@@ -1,0 +1,12 @@
+/build*/
+/packaging/src/
+/packaging/pkg/
+/packaging/*.tar.gz
+/packaging/*.pkg.tar.zst
+/evidence/
+/dist/
+/stage/
+__pycache__/
+*.py[cod]
+*.core
+core

@@ -1,0 +1,13 @@
+[Xfce Panel]
+Type=X-XFCE-PanelPlugin
+Name=Zero Dock Window Dock
+Name[zh_CN]=Zero Dock 窗口停靠
+Comment=Independent window buttons, launchers, previews and application audio
+Comment[zh_CN]=独立窗口图标、固定应用、实时预览与应用音量控制
+Icon=preferences-desktop-display
+X-XFCE-Module=zero-dock
+X-XFCE-API=2.0
+X-XFCE-Internal=false
+X-XFCE-Unique=false
+X-XFCE-Supports-X11=true
+X-XFCE-Supports-Wayland=false

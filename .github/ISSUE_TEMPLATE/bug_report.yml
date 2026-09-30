@@ -1,0 +1,23 @@
+name: Bug report
+description: Report a reproducible Zero Dock problem.
+labels: [bug]
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Zero Dock version, distribution, XFCE/GTK versions, X11 compositor, audio server and display layout.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps and expected/actual behavior
+      description: Include mouse position and input device for scroll issues, or application names for audio matching.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant evidence
+      description: Small log excerpts or a minimal fixture. Remove personal paths, window titles and sensitive information. Please do not restart XFCE just to collect logs.
