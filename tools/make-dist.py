@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create deterministic source archives from Git-indexed working-tree files."""
+"""Create deterministic archives from tracked files and new source files."""
 import gzip
 import hashlib
 from pathlib import Path
@@ -16,10 +16,19 @@ def main():
     if not match or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-.a-zA-Z0-9]*)', match[1]):
         raise SystemExit('Cannot determine a safe release version from meson.build')
     version = match[1]
-    paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode().split('\0')
-    paths = sorted(p for p in paths if p and not p.startswith('packaging/'))
+    tracked = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode().split('\0')
+    added = subprocess.check_output(
+        ['git', 'ls-files', '--others', '--exclude-standard', '-z'], cwd=ROOT
+    ).decode().split('\0')
+    allowed_roots = {'src', 'data', 'docs', 'tests', 'tools', 'po'}
+    allowed_extensions = {'.c', '.h', '.py', '.md', '.po', '.pot', '.in', '.desktop'}
+    new_sources = [p for p in added if p and Path(p).parts[0] in allowed_roots
+                   and (Path(p).suffix in allowed_extensions
+                        or Path(p).name in {'meson.build', 'LINGUAS'})]
+    paths = sorted(p for p in set(tracked + new_sources)
+                   if p and not p.startswith('packaging/'))
     if 'src/input.c' not in paths or 'LICENSE' not in paths or 'meson_options.txt' not in paths:
-        raise SystemExit('Stage the complete source tree before creating a release archive')
+        raise SystemExit('Source tree is incomplete')
     output = ROOT / 'dist' / f'zero-dock-{version}.tar.gz'
     output.parent.mkdir(exist_ok=True)
     with output.open('wb') as raw:

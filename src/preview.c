@@ -2,6 +2,48 @@
 #include <X11/extensions/Xcomposite.h>
 #include <cairo/cairo-xlib.h>
 #include <math.h>
+static GdkRectangle monitor_bounds(ZdButton *b) {
+  GdkRectangle bounds = {0, 0, 1024, 768};
+  GdkMonitor *monitor = NULL;
+  GtkWidget *top = gtk_widget_get_toplevel(b->main);
+  gint x, y, ox, oy;
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(b->main, &allocation);
+  if (gtk_widget_get_realized(top) &&
+      gtk_widget_translate_coordinates(b->main, top, 0, 0, &x, &y)) {
+    gdk_window_get_origin(gtk_widget_get_window(top), &ox, &oy);
+    monitor = gdk_display_get_monitor_at_point(gdk_display_get_default(),
+                                               ox + x + allocation.width / 2,
+                                               oy + y + allocation.height / 2);
+  }
+  if (!monitor && gdk_display_get_n_monitors(gdk_display_get_default()))
+    monitor = gdk_display_get_monitor(gdk_display_get_default(), 0);
+  if (monitor)
+    gdk_monitor_get_workarea(monitor, &bounds);
+  return bounds;
+}
+void zd_trim_frames(ZdDock *d, ZdButton *keep) {
+  gsize total = 0;
+  for (GList *l = d->buttons; l; l = l->next) {
+    ZdButton *b = l->data;
+    if (b->thumbnail)
+      total += gdk_pixbuf_get_byte_length(b->thumbnail);
+  }
+  while (total > 32 * 1024 * 1024) {
+    ZdButton *oldest = NULL;
+    for (GList *l = d->buttons; l; l = l->next) {
+      ZdButton *b = l->data;
+      if (b != keep && b->thumbnail &&
+          (!oldest || b->thumbnail_time < oldest->thumbnail_time))
+        oldest = b;
+    }
+    if (!oldest)
+      break;
+    total -= gdk_pixbuf_get_byte_length(oldest->thumbnail);
+    g_clear_object(&oldest->thumbnail);
+    oldest->thumbnail_time = 0;
+  }
+}
 GdkPixbuf *zd_capture(ZdButton *b) {
   if (!b->window || b->closed)
     return NULL;
@@ -27,13 +69,15 @@ GdkPixbuf *zd_capture(ZdButton *b) {
       gint xerror = gdk_x11_display_error_trap_pop(gd);
       if (pix && xerror == 0) {
         gdk_x11_display_error_trap_push(gd);
-        gint width = b->dock->preview_width,
+        GdkRectangle bounds = monitor_bounds(b);
+        gint max_height = MAX(1, MIN(400, bounds.height - 160));
+        gint width = MIN(b->dock->preview_width, MAX(1, bounds.width - 48)),
              height =
                  MAX(1, (gint)round((double)attr.height * width / attr.width));
         // Bound tall windows without distorting their aspect ratio.
-        if (height > 400) {
-          width = MAX(1, (gint)round(width * 400. / height));
-          height = 400;
+        if (height > max_height) {
+          width = MAX(1, (gint)round(width * (double)max_height / height));
+          height = max_height;
         }
         cairo_surface_t *src = cairo_xlib_surface_create(
             x, pix, attr.visual, attr.width, attr.height);
@@ -65,6 +109,8 @@ GdkPixbuf *zd_capture(ZdButton *b) {
       gdk_x11_display_error_trap_pop_ignored(gd);
     if (result) {
       g_set_object(&b->thumbnail, result);
+      b->thumbnail_time = g_get_monotonic_time();
+      zd_trim_frames(b->dock, b);
       g_object_unref(result);
     }
   }
@@ -156,6 +202,11 @@ static gboolean image_click(GtkWidget *w, GdkEventButton *e, ZdDock *d) {
   }
   return FALSE;
 }
+static void popup_close(GtkButton *widget, ZdDock *d) {
+  (void)widget;
+  if (d->hover_button)
+    zd_close_window(d->hover_button);
+}
 static void popup_mute(GtkButton *w, ZdDock *d) {
   (void)w;
   if (d->hover_button) {
@@ -197,7 +248,10 @@ static void position_popup(ZdDock *d, GtkWidget *popup, GtkWidget *anchor) {
       gdk_display_get_default(), ax + allocation.width / 2,
       ay + allocation.height / 2);
   GdkRectangle bounds;
-  gdk_monitor_get_geometry(monitor, &bounds);
+  if (monitor)
+    gdk_monitor_get_workarea(monitor, &bounds);
+  else
+    bounds = (GdkRectangle){0, 0, 1024, 768};
   gint x, y;
   if (d->orientation == GTK_ORIENTATION_HORIZONTAL) {
     x = ax + (allocation.width - width) / 2;
@@ -228,28 +282,48 @@ void zd_preview_update_audio(ZdDock *d) {
                            b->audio.muted ? "audio-volume-muted-symbolic"
                                           : "audio-volume-high-symbolic",
                            GTK_ICON_SIZE_BUTTON));
-  gtk_widget_set_tooltip_text(d->preview_sound,
-                              b->audio.muted ? "取消应用静音" : "应用静音");
+  gtk_widget_set_tooltip_text(
+      d->preview_sound, b->audio.muted ? _("取消应用静音") : _("应用静音"));
 }
 static void update_preview(ZdDock *d) {
   ZdButton *b = d->hover_button;
   if (!b || !b->window)
     return;
+  GdkRectangle bounds = monitor_bounds(b);
+  gint max_width = MIN(d->preview_width, MAX(1, bounds.width - 48)),
+       max_height = MAX(1, MIN(400, bounds.height - 160));
+  gtk_widget_set_size_request(gtk_widget_get_parent(d->preview_image),
+                              max_width, MIN(140, max_height));
   GdkPixbuf *p = zd_capture(b);
+  if (p && (gdk_pixbuf_get_width(p) > max_width ||
+            gdk_pixbuf_get_height(p) > max_height)) {
+    double ratio = MIN((double)max_width / gdk_pixbuf_get_width(p),
+                       (double)max_height / gdk_pixbuf_get_height(p));
+    GdkPixbuf *scaled = gdk_pixbuf_scale_simple(
+        p, MAX(1, (gint)(gdk_pixbuf_get_width(p) * ratio)),
+        MAX(1, (gint)(gdk_pixbuf_get_height(p) * ratio)), GDK_INTERP_BILINEAR);
+    g_object_unref(p);
+    p = scaled;
+  }
   if (p) {
     gtk_image_set_from_pixbuf(GTK_IMAGE(d->preview_image), p);
     g_object_unref(p);
     gtk_label_set_text(GTK_LABEL(d->preview_status),
                        xfw_window_is_minimized(b->window)
-                           ? "已最小化 · 最后一帧"
-                           : "点击预览切换窗口");
+                           ? _("已最小化 · 最后一帧")
+                           : _("点击预览切换窗口"));
   } else {
     gtk_image_set_from_pixbuf(GTK_IMAGE(d->preview_image), b->icon);
     gtk_label_set_text(GTK_LABEL(d->preview_status),
-                       "暂无可用画面 · 点击恢复窗口");
+                       _("暂无可用画面 · 点击恢复窗口"));
   }
   gtk_label_set_text(GTK_LABEL(d->preview_title),
                      xfw_window_get_name(b->window));
+  gtk_widget_set_tooltip_text(d->preview_title, xfw_window_get_name(b->window));
+  XfwWorkspace *ws = xfw_window_get_workspace(b->window);
+  const gchar *workspace = ws ? xfw_workspace_get_name(ws) : NULL;
+  gtk_label_set_text(GTK_LABEL(d->preview_workspace),
+                     workspace ? workspace : _("所有工作区"));
   zd_preview_update_audio(d);
   if (gtk_widget_get_visible(d->preview))
     position_popup(d, d->preview, b->main);
@@ -275,7 +349,10 @@ static gboolean show_preview(gpointer data) {
     gtk_container_add(GTK_CONTAINER(d->preview), box);
     gtk_container_set_border_width(GTK_CONTAINER(box), 6);
     d->preview_image = gtk_image_new();
-    gtk_widget_set_size_request(image_box, d->preview_width, 140);
+    GdkRectangle bounds = monitor_bounds(d->hover_button);
+    gtk_widget_set_size_request(
+        image_box, MIN(d->preview_width, MAX(1, bounds.width - 48)),
+        MIN(140, MAX(1, bounds.height - 160)));
     gtk_container_add(GTK_CONTAINER(image_box), d->preview_image);
     gtk_box_pack_start(GTK_BOX(box), image_box, FALSE, FALSE, 0);
     d->preview_title = gtk_label_new("");
@@ -284,8 +361,17 @@ static gboolean show_preview(gpointer data) {
     gtk_label_set_xalign(GTK_LABEL(d->preview_title), 0);
     gtk_box_pack_start(GTK_BOX(row), d->preview_title, TRUE, TRUE, 0);
     d->preview_sound = gtk_button_new();
+    d->preview_close = gtk_button_new_from_icon_name("window-close-symbolic",
+                                                     GTK_ICON_SIZE_BUTTON);
+    gtk_widget_set_tooltip_text(d->preview_close, _("关闭窗口"));
+    atk_object_set_name(gtk_widget_get_accessible(d->preview_close),
+                        _("关闭窗口"));
+    g_signal_connect(d->preview_close, "clicked", G_CALLBACK(popup_close), d);
+    gtk_box_pack_end(GTK_BOX(row), d->preview_close, FALSE, FALSE, 0);
     gtk_box_pack_end(GTK_BOX(row), d->preview_sound, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), row, FALSE, FALSE, 0);
+    d->preview_workspace = gtk_label_new("");
+    gtk_box_pack_start(GTK_BOX(box), d->preview_workspace, FALSE, FALSE, 0);
     d->preview_status = gtk_label_new("");
     gtk_box_pack_start(GTK_BOX(box), d->preview_status, FALSE, FALSE, 0);
     gtk_widget_add_events(image_box, GDK_BUTTON_PRESS_MASK);
@@ -306,7 +392,7 @@ static gboolean show_preview(gpointer data) {
   position_popup(d, d->preview, d->hover_button->main);
   xfce_panel_plugin_block_autohide(d->plugin, TRUE);
   d->autohide_blocked = TRUE;
-  d->preview_tick = g_timeout_add(650, preview_tick, d);
+  d->preview_tick = g_timeout_add(d->preview_interval, preview_tick, d);
   return G_SOURCE_REMOVE;
 }
 void zd_preview_schedule(ZdButton *b) {
@@ -319,10 +405,10 @@ void zd_preview_schedule(ZdButton *b) {
     return;
   }
   zd_preview_hide(d);
-  if (b->pinned || !d->previews || d->dragging)
+  if (!b->window || !d->previews || d->dragging)
     return;
   d->hover_button = b;
-  d->hover_id = g_timeout_add(350, show_preview, d);
+  d->hover_id = g_timeout_add(d->preview_delay, show_preview, d);
 }
 static gboolean bubble_hide(gpointer p) {
   ZdDock *d = p;
@@ -345,8 +431,8 @@ void zd_volume_bubble(ZdButton *b) {
     gtk_box_pack_start(GTK_BOX(box), d->bubble_bar, FALSE, FALSE, 0);
   }
   ZdAudioStatus a = zd_audio_status(b);
-  gchar *s = g_strdup_printf(a.muted ? "应用已静音 · %u%%" : "应用音量 %u%%",
-                             a.percent);
+  gchar *s = g_strdup_printf(
+      a.muted ? _("应用已静音 · %u%%") : _("应用音量 %u%%"), a.percent);
   gtk_label_set_text(GTK_LABEL(d->bubble_text), s);
   g_free(s);
   gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(d->bubble_bar),

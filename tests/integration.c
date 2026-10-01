@@ -5,6 +5,8 @@
 #include <gtk/gtkx.h>
 #include <libxfce4panel/xfce-panel-plugin-provider.h>
 #include <signal.h>
+#include <stdio.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 static void spin(guint ms) {
@@ -317,21 +319,23 @@ static void all(void) {
                       GDK_ACTION_COPY);
   g_signal_connect(uri_source, "drag-data-get", G_CALLBACK(uri_data), desktop);
   drag_between(uri_source, a->main);
-  g_assert_cmpuint(g_list_length(d->buttons), ==, 3);
-  g_test_message("PASS real desktop-file URI drag pins a launcher");
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 2);
+  g_assert_true(a->pinned);
+  g_test_message(
+      "PASS real desktop-file URI drag pins a running button in place");
   GDesktopAppInfo *app = g_desktop_app_info_new_from_filename(desktop);
   g_set_object(&a->app, app);
   g_set_object(&b->app, app);
   zd_pin_app(d, app);
   zd_pin_app(d, app);
-  g_assert_cmpuint(g_list_length(d->buttons), ==, 3);
-  ZdButton *pin = g_list_last(d->buttons)->data;
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 2);
+  ZdButton *pin = a;
   g_assert_true(pin->pinned);
   g_assert_cmpuint(g_list_length(d2->buttons), ==, 2);
-  zd_move_button(d, pin, a, FALSE);
+  zd_move_button(d, pin, b, FALSE);
   g_assert_true(d->buttons->data == pin);
   zd_move_button(d, b, a, FALSE);
-  g_assert_true(d->buttons->next->data == b);
+  g_assert_true(d->buttons->data == b);
   spin(150);
   evidence(h, "drag-before.png");
   drag_between(a->main, b->main);
@@ -384,7 +388,7 @@ static void all(void) {
                  "click activation, autohide unlock");
   zd_preview_schedule(a);
   spin(400);
-  zd_preview_schedule(pin);
+  zd_preview_hide(d);
   g_assert_false(gtk_widget_get_visible(d->preview));
   g_assert_null(d->hover_button);
   d->previews = FALSE;
@@ -410,8 +414,8 @@ static void all(void) {
   g_list_free(items);
   gtk_widget_destroy(d->menu);
   gdk_event_free(event);
-  g_test_message("PASS window/workspace menu, desktop actions menu, adjacent "
-                 "launcher closes preview, tooltip fallback");
+  g_test_message("PASS window/workspace menu, desktop actions menu and "
+                 "tooltip fallback");
   gchar *av[] = {"/usr/bin/pacat", "--playback",
                  "--raw",          "--rate=8000",
                  "--channels=1",   "--format=s16le",
@@ -589,11 +593,985 @@ static void all(void) {
   g_free(marker);
   g_free(dir);
 }
+static void pinned_lifecycle(void) {
+  gchar *dir = g_dir_make_tmp("zero-dock-pins-XXXXXX", NULL);
+  gchar *rc = g_build_filename(dir, "pins.rc", NULL),
+        *desktop = g_build_filename(dir, "fixture.desktop", NULL),
+        *other = g_build_filename(dir, "other.desktop", NULL),
+        *binary = g_build_filename(g_getenv("ZERO_DOCK_TEST_BUILD"),
+                                   "zero-dock-integration", NULL);
+  gchar *entry =
+      g_strdup_printf("[Desktop Entry]\nType=Application\nName=Launch fixture\n"
+                      "Exec=\"%s\" --launch-fixture\nIcon=utilities-terminal\n"
+                      "StartupWMClass=ZeroDockFixture\n",
+                      binary);
+  g_assert_true(g_file_set_contents(desktop, entry, -1, NULL));
+  g_assert_true(
+      g_file_set_contents(other,
+                          "[Desktop Entry]\nType=Application\nName=Other app\n"
+                          "Exec=/usr/bin/true\nStartupWMClass=OtherFixture\n",
+                          -1, NULL));
+  GKeyFile *config = g_key_file_new();
+  const gchar *pins[] = {desktop, desktop, other};
+  g_key_file_set_string_list(config, "Dock", "Pinned", pins, 3);
+  g_assert_true(g_key_file_save_to_file(config, rc, NULL));
+  g_key_file_unref(config);
+  GtkWidget *h;
+  XfcePanelPlugin *p = host(rc, 9010, &h);
+  ZdDock *d = zd_get_dock(p);
+  spin(200);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 2);
+  ZdButton *pin = d->buttons->data, *other_pin = d->buttons->next->data;
+  GtkWidget *original_widget = pin->widget;
+  gchar *original_key = g_strdup(pin->key);
+  g_assert_null(pin->window);
+  zd_preview_schedule(pin);
+  g_assert_null(d->hover_button);
+
+  /* Launch a separate process through the actual desktop entry. */
+  gtk_button_clicked(GTK_BUTTON(pin->main));
+  for (guint i = 0; i < 20 && !pin->window; i++)
+    spin(100);
+  g_assert_nonnull(pin->window);
+  g_assert_true(pin->widget == original_widget);
+  g_assert_true(d->buttons->data == pin);
+  g_assert_cmpstr(pin->key, ==, original_key);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 2);
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 1);
+  g_assert_cmpuint(pin->number, ==, 0);
+  g_assert_true(g_hash_table_lookup(d->windows, pin->window) == pin);
+  zd_activate(pin);
+  spin(200);
+  gtk_button_clicked(GTK_BUTTON(pin->main));
+  spin(200);
+  g_assert_true(xfw_window_is_minimized(pin->window));
+  gtk_button_clicked(GTK_BUTTON(pin->main));
+  spin(200);
+  g_assert_false(xfw_window_is_minimized(pin->window));
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 1);
+  g_test_message("PASS fixed icon launches, reuses its widget and toggles the "
+                 "sole window without creating another icon or process");
+
+  mouse_at(pin->main);
+  spin(50);
+  Display *x = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
+  XTestFakeButtonEvent(x, 2, True, CurrentTime);
+  XTestFakeButtonEvent(x, 2, False, CurrentTime);
+  XFlush(x);
+  for (guint i = 0; i < 20 && g_hash_table_size(d->windows) < 2; i++)
+    spin(100);
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 2);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 3);
+  ZdButton *second = g_list_last(d->buttons)->data;
+  g_assert_false(second->pinned);
+  g_assert_nonnull(second->window);
+  g_assert_cmpuint(pin->number, >, 0);
+  g_assert_cmpuint(second->number, >, 0);
+  g_assert_cmpuint(pin->number, !=, second->number);
+  zd_minimize(second);
+  spin(200);
+  GdkPixbuf *frame = second->thumbnail ? g_object_ref(second->thumbnail) : NULL;
+  g_assert_nonnull(frame);
+  XfwWindow *remaining = g_object_ref(second->window);
+  zd_preview_schedule(pin);
+  spin(400);
+  g_assert_true(d->autohide_blocked);
+  xfw_window_close(pin->window, zd_timestamp(d), NULL);
+  spin(500);
+  g_assert_true(pin->window == remaining);
+  g_assert_true(pin->thumbnail == frame);
+  g_assert_true(pin->widget == original_widget);
+  g_assert_true(d->buttons->data == pin);
+  g_assert_true(d->buttons->next->data == other_pin);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 2);
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 1);
+  g_assert_cmpuint(pin->number, ==, 0);
+  g_assert_null(d->hover_button);
+  g_assert_false(d->autohide_blocked);
+  g_object_unref(frame);
+  g_test_message("PASS middle click opens a separate second window; closing "
+                 "the first transfers the remaining window and cached frame "
+                 "to the fixed position and releases the preview");
+
+  zd_unpin(pin);
+  g_assert_false(pin->pinned);
+  g_assert_null(pin->desktop);
+  g_assert_true(pin->window == remaining);
+  g_assert_true(g_str_has_prefix(pin->key, "window:"));
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 1);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 2);
+  GDesktopAppInfo *app = g_desktop_app_info_new_from_filename(desktop);
+  zd_pin_app(d, app);
+  g_object_unref(app);
+  g_assert_true(pin->pinned);
+  g_assert_cmpstr(pin->key, ==, original_key);
+  xfw_window_close(pin->window, zd_timestamp(d), NULL);
+  spin(500);
+  g_assert_null(pin->window);
+  g_assert_null(pin->thumbnail);
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 0);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 2);
+  g_assert_true(gtk_widget_get_visible(pin->widget));
+  g_assert_false(gtk_widget_get_visible(pin->sound));
+  g_assert_nonnull(gtk_widget_get_tooltip_text(pin->main));
+  zd_preview_schedule(pin);
+  g_assert_null(d->hover_button);
+  g_object_unref(remaining);
+
+  /* Class metadata may arrive late or change after a splash window. */
+  GtkWidget *w = fixture("Changing application identity");
+  spin(200);
+  g_assert_true(button(d, w) == pin);
+  XClassHint hint = {"OtherFixture", "OtherFixture"};
+  XSetClassHint(x, GDK_WINDOW_XID(gtk_widget_get_window(w)), &hint);
+  XFlush(x);
+  spin(200);
+  g_assert_null(pin->window);
+  g_assert_true(button(d, w) == other_pin);
+  hint.res_name = hint.res_class = "UnknownZeroDockIdentity";
+  XSetClassHint(x, GDK_WINDOW_XID(gtk_widget_get_window(w)), &hint);
+  XFlush(x);
+  spin(200);
+  g_assert_null(other_pin->window);
+  g_assert_false(button(d, w)->pinned);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 3);
+  hint.res_name = hint.res_class = "ZeroDockFixture";
+  XSetClassHint(x, GDK_WINDOW_XID(gtk_widget_get_window(w)), &hint);
+  XFlush(x);
+  spin(200);
+  g_assert_true(button(d, w) == pin);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 2);
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 1);
+  gtk_widget_destroy(w);
+  spin(200);
+  g_assert_null(pin->window);
+  g_test_message("PASS changing or late window classes rebind the correct "
+                 "fixed app, while unmatched windows remain independent");
+
+  zd_move_button(d, pin, other_pin, TRUE);
+  gtk_widget_destroy(h);
+  spin(100);
+  p = host(rc, 9011, &h);
+  d = zd_get_dock(p);
+  spin(100);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 2);
+  g_assert_cmpstr(((ZdButton *)d->buttons->data)->desktop, ==, other);
+  g_assert_cmpstr(((ZdButton *)d->buttons->next->data)->desktop, ==, desktop);
+  zd_unpin(d->buttons->next->data);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 1);
+  gtk_widget_destroy(h);
+  spin(100);
+  g_test_message(
+      "PASS unpinning keeps the live window, the last close restores "
+      "the launcher, duplicate saved pins are removed, and fixed "
+      "order survives reload");
+  g_remove(rc);
+  g_remove(desktop);
+  g_remove(other);
+  g_rmdir(dir);
+  g_free(dir);
+  g_free(rc);
+  g_free(desktop);
+  g_free(other);
+  g_free(binary);
+  g_free(entry);
+  g_free(original_key);
+}
+static GtkWidget *find_preference(GtkWidget *widget, ZdDock *d) {
+  GtkWidget *reset = NULL;
+  if (GTK_IS_SPIN_BUTTON(widget)) {
+    guint *field = g_object_get_data(G_OBJECT(widget), "setting");
+    if (field == &d->preview_width)
+      gtk_spin_button_set_value(GTK_SPIN_BUTTON(widget), 420);
+    else if (field == &d->preview_delay)
+      gtk_spin_button_set_value(GTK_SPIN_BUTTON(widget), 150);
+    else if (field == &d->preview_interval)
+      gtk_spin_button_set_value(GTK_SPIN_BUTTON(widget), 250);
+  } else if (GTK_IS_BUTTON(widget) &&
+             !g_strcmp0(gtk_button_get_label(GTK_BUTTON(widget)),
+                        _("恢复默认设置（保留固定应用）")))
+    reset = widget;
+  if (GTK_IS_CONTAINER(widget)) {
+    GList *children = gtk_container_get_children(GTK_CONTAINER(widget));
+    for (GList *l = children; l; l = l->next) {
+      GtkWidget *candidate = find_preference(l->data, d);
+      if (candidate)
+        reset = candidate;
+    }
+    g_list_free(children);
+  }
+  return reset;
+}
+
+static void launch_feedback(void) {
+  gchar *dir = g_dir_make_tmp("zero-dock-launch-XXXXXX", NULL);
+  gchar *rc = g_build_filename(dir, "settings.rc", NULL),
+        *desktop = g_build_filename(dir, "slow.desktop", NULL),
+        *timeout = g_build_filename(dir, "no-window.desktop", NULL),
+        *failure = g_build_filename(dir, "failure.desktop", NULL),
+        *missing = g_build_filename(dir, "missing.desktop", NULL),
+        *binary = g_build_filename(g_getenv("ZERO_DOCK_TEST_BUILD"),
+                                   "zero-dock-integration", NULL);
+  gchar *entry = g_strdup_printf(
+      "[Desktop Entry]\nType=Application\nName=Slow fixture\n"
+      "Exec=\"%s\" --launch-fixture=500\nStartupWMClass=ZeroDockFixture\n",
+      binary);
+  g_assert_true(g_file_set_contents(desktop, entry, -1, NULL));
+  g_assert_true(g_file_set_contents(
+      timeout,
+      "[Desktop Entry]\nType=Application\nName=No window\nExec=/usr/bin/true\n",
+      -1, NULL));
+  gchar *bad = g_strdup_printf("[Desktop "
+                               "Entry]\nType=Application\nName=Failure\nExec=/"
+                               "usr/bin/true\nPath=%s/missing-directory\n",
+                               dir);
+  g_assert_true(g_file_set_contents(failure, bad, -1, NULL));
+  GtkWidget *h;
+  XfcePanelPlugin *p = host(rc, 9020, &h);
+  ZdDock *d = zd_get_dock(p);
+  ZdButton *pin = zd_add_pin(d, desktop), *no_window = zd_add_pin(d, timeout),
+           *fail = zd_add_pin(d, failure), *lost = zd_add_pin(d, missing);
+  g_assert_nonnull(fail->app);
+  g_assert_nonnull(lost);
+  g_assert_null(lost->app);
+  zd_refresh(d);
+  gtk_button_clicked(GTK_BUTTON(pin->main));
+  pid_t pid = pin->launch_pid;
+  g_assert_cmpint(pid, >, 1);
+  g_assert_true(pin->launching);
+  gtk_button_clicked(GTK_BUTTON(pin->main));
+  gtk_button_clicked(GTK_BUTTON(pin->main));
+  g_assert_cmpint(pin->launch_pid, ==, pid);
+  g_assert_null(pin->window);
+  spin(900);
+  g_assert_nonnull(pin->window);
+  g_assert_false(pin->launching);
+  g_assert_null(pin->launch_error);
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 1);
+  g_assert_cmpint(zd_window_pid(pin->window), ==, pid);
+  g_test_message("PASS repeated left clicks during slow startup submit one "
+                 "process and clear feedback when its window arrives");
+  GdkPixbuf *cached = g_object_ref(pin->icon);
+  gint64 begin = g_get_monotonic_time();
+  for (guint i = 0; i < 100; i++)
+    zd_update_audio_buttons(d);
+  g_assert_true(cached == pin->icon);
+  g_test_message("100 audio-only updates: %.2f ms; window icon retained",
+                 (g_get_monotonic_time() - begin) / 1000.);
+  GdkPixbuf *replacement = gdk_pixbuf_new(GDK_COLORSPACE_RGB, TRUE, 8, 32, 32);
+  gdk_pixbuf_fill(replacement, 0x3399ffff);
+  /* Exercise actual icon invalidation on a local fixture. */
+  GtkWidget *w = fixture("Icon change fixture");
+  spin(200);
+  ZdButton *running = button(d, w);
+  GdkPixbuf *old = g_object_ref(running->icon);
+  gtk_window_set_icon(GTK_WINDOW(w), replacement);
+  spin(200);
+  g_assert_true(running->icon != old);
+  g_object_unref(old);
+  g_object_unref(replacement);
+  g_object_unref(cached);
+  gtk_widget_destroy(w);
+  spin(100);
+  d->launch_timeout = 200;
+  gtk_button_clicked(GTK_BUTTON(no_window->main));
+  g_assert_true(no_window->launching);
+  spin(350);
+  g_assert_false(no_window->launching);
+  g_assert_nonnull(no_window->launch_error);
+  gtk_button_clicked(GTK_BUTTON(no_window->main));
+  g_assert_true(no_window->launching);
+  zd_launch(fail);
+  g_assert_false(fail->launching);
+  g_assert_nonnull(fail->launch_error);
+  g_assert_nonnull(d->error_dialog);
+  gtk_widget_destroy(d->error_dialog);
+  zd_launch(lost);
+  g_assert_nonnull(d->error_dialog);
+  gtk_widget_destroy(d->error_dialog);
+  zd_save(d);
+  GKeyFile *config = g_key_file_new();
+  g_assert_true(g_key_file_load_from_file(config, rc, G_KEY_FILE_NONE, NULL));
+  gsize count;
+  gchar **saved =
+      g_key_file_get_string_list(config, "Dock", "Pinned", &count, NULL);
+  g_assert_cmpuint(count, ==, 4);
+  g_assert_cmpstr(saved[3], ==, missing);
+  g_strfreev(saved);
+  g_key_file_unref(config);
+  gchar *diagnostic = zd_diagnostics(d);
+  g_assert_nonnull(strstr(diagnostic, ZERO_DOCK_VERSION));
+  g_assert_null(strstr(diagnostic, dir));
+  g_assert_null(strstr(diagnostic, "Slow fixture"));
+  g_free(diagnostic);
+  zd_configure(p, d);
+  GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(d->settings));
+  GtkWidget *reset = find_preference(content, d);
+  g_assert_cmpuint(d->preview_width, ==, 420);
+  g_assert_cmpuint(d->preview_delay, ==, 150);
+  g_assert_cmpuint(d->preview_interval, ==, 250);
+  config = g_key_file_new();
+  g_assert_true(g_key_file_load_from_file(config, rc, G_KEY_FILE_NONE, NULL));
+  g_assert_cmpint(g_key_file_get_integer(config, "Dock", "PreviewWidth", NULL),
+                  ==, 420);
+  g_key_file_unref(config);
+  g_assert_nonnull(reset);
+  gtk_button_clicked(GTK_BUTTON(reset));
+  g_assert_cmpuint(d->preview_width, ==, 300);
+  g_assert_cmpuint(d->launch_timeout, ==, 10000);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 4);
+  gtk_widget_destroy(d->settings);
+  g_test_message("PASS native preference controls persist values and restoring "
+                 "defaults preserves all fixed apps, including missing files");
+  xfw_window_close(pin->window, zd_timestamp(d), NULL);
+  spin(200);
+  gtk_button_clicked(GTK_BUTTON(no_window->main));
+  gtk_widget_destroy(h);
+  spin(300);
+  g_assert_true(
+      g_file_set_contents(rc, "[Dock]\nPinned=original;\n[broken", -1, NULL));
+  p = host(rc, 9021, &h);
+  d = zd_get_dock(p);
+  g_assert_nonnull(d->error_dialog);
+  g_assert_false(d->save_blocked);
+  GDir *directory = g_dir_open(dir, 0, NULL);
+  const gchar *name;
+  gchar *backup = NULL;
+  while ((name = g_dir_read_name(directory)))
+    if (g_str_has_prefix(name, "settings.rc.invalid-")) {
+      backup = g_build_filename(dir, name, NULL);
+      break;
+    }
+  g_dir_close(directory);
+  g_assert_nonnull(backup);
+  gchar *preserved = NULL;
+  g_assert_true(g_file_get_contents(backup, &preserved, NULL, NULL));
+  g_assert_cmpstr(preserved, ==, "[Dock]\nPinned=original;\n[broken");
+  gtk_widget_destroy(h);
+  spin(100);
+  g_remove(backup);
+  g_free(backup);
+  g_free(preserved);
+  g_test_message(
+      "PASS launch timeout/retry, visible spawn errors, missing "
+      "launcher persistence, cached icons, minimal diagnostics "
+      "and disposal during startup; malformed configs are backed up");
+  g_remove(desktop);
+  g_remove(timeout);
+  g_remove(failure);
+  g_remove(rc);
+  g_rmdir(dir);
+  g_free(dir);
+  g_free(rc);
+  g_free(desktop);
+  g_free(timeout);
+  g_free(failure);
+  g_free(missing);
+  g_free(binary);
+  g_free(entry);
+  g_free(bad);
+}
+static void identity_workspaces(void) {
+  gchar *dir = g_dir_make_tmp("zero-dock-identity-XXXXXX", NULL);
+  gchar *rc = g_build_filename(dir, "settings.rc", NULL),
+        *first = g_build_filename(dir, "first.desktop", NULL),
+        *second = g_build_filename(dir, "second.desktop", NULL);
+  const gchar *entry =
+      "[Desktop Entry]\nType=Application\nName=Identity fixture\n"
+      "Exec=/usr/bin/true\nStartupWMClass=ZeroDockFixture\n";
+  g_assert_true(g_file_set_contents(first, entry, -1, NULL));
+  g_assert_true(g_file_set_contents(second, entry, -1, NULL));
+  GtkWidget *h;
+  XfcePanelPlugin *p = host(rc, 9030, &h);
+  gtk_window_stick(GTK_WINDOW(h));
+  ZdDock *d = zd_get_dock(p);
+  ZdButton *a = zd_add_pin(d, first), *b = zd_add_pin(d, second);
+  GtkWidget *w = fixture("Identity fixture");
+  spin(200);
+  g_assert_true(button(d, w) == a);
+  Display *x = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
+  Window xid = GDK_WINDOW_XID(gtk_widget_get_window(w));
+  Atom gtk_id = XInternAtom(x, "_GTK_APPLICATION_ID", False),
+       desktop_id = XInternAtom(x, "_KDE_NET_WM_DESKTOP_FILE", False),
+       utf8 = XInternAtom(x, "UTF8_STRING", False);
+  XChangeProperty(x, xid, gtk_id, utf8, 8, PropModeReplace,
+                  (const unsigned char *)"second", 6);
+  XFlush(x);
+  spin(200);
+  g_assert_true(button(d, w) == b);
+  g_assert_null(a->window);
+  XDeleteProperty(x, xid, gtk_id);
+  XChangeProperty(x, xid, desktop_id, utf8, 8, PropModeReplace,
+                  (const unsigned char *)first, strlen(first));
+  XFlush(x);
+  spin(200);
+  g_assert_true(button(d, w) == a);
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 2);
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 1);
+  zd_unpin(b);
+  GtkWidget *w2 = fixture("Workspace fixture");
+  spin(200);
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 2);
+  XfwWorkspaceManager *manager = xfw_screen_get_workspace_manager(d->screen);
+  GList *spaces = xfw_workspace_manager_list_workspaces(manager);
+  g_assert_cmpuint(g_list_length(spaces), >=, 2);
+  XfwWorkspace *original = xfw_window_get_workspace(a->window), *other = NULL;
+  for (GList *l = spaces; l; l = l->next)
+    if (l->data != original) {
+      other = l->data;
+      break;
+    }
+  g_assert_nonnull(other);
+  d->all_workspaces = FALSE;
+  xfw_window_move_to_workspace(a->window, other, NULL);
+  spin(200);
+  g_assert_true(button(d, w2) == a);
+  g_assert_false(gtk_widget_get_visible(button(d, w)->widget));
+  g_assert_true(gtk_widget_get_visible(a->widget));
+  g_assert_cmpuint(a->number, ==, 0);
+  xfw_workspace_activate(other, NULL);
+  spin(200);
+  g_assert_true(button(d, w) == a);
+  g_assert_false(gtk_widget_get_visible(button(d, w2)->widget));
+  g_assert_cmpuint(g_list_length(d->buttons), ==, 2);
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 2);
+  GdkEvent *event = gdk_event_new(GDK_BUTTON_PRESS);
+  event->button.window = g_object_ref(gtk_widget_get_window(a->main));
+  event->button.button = 3;
+  event->button.time = zd_timestamp(d);
+  gdk_event_set_device(event, gdk_seat_get_pointer(gdk_display_get_default_seat(
+                                  gdk_display_get_default())));
+  zd_window_menu(a, event);
+  GList *items = gtk_container_get_children(GTK_CONTAINER(d->menu));
+  GtkWidget *list = gtk_menu_item_get_submenu(GTK_MENU_ITEM(items->data));
+  g_assert_nonnull(list);
+  GList *windows = gtk_container_get_children(GTK_CONTAINER(list));
+  g_assert_cmpuint(g_list_length(windows), ==, 2);
+  for (GList *l = windows; l; l = l->next) {
+    XfwWindow *target = g_object_get_data(G_OBJECT(l->data), "window");
+    if (target == button(d, w2)->window) {
+      g_signal_emit_by_name(l->data, "activate");
+      break;
+    }
+  }
+  g_list_free(windows);
+  g_list_free(items);
+  gdk_event_free(event);
+  spin(200);
+  g_assert_true(xfw_workspace_get_state(original) & XFW_WORKSPACE_STATE_ACTIVE);
+  g_assert_true(button(d, w2) == a);
+  if (d->menu)
+    gtk_widget_destroy(d->menu);
+  gtk_widget_destroy(w);
+  gtk_widget_destroy(w2);
+  spin(200);
+  g_assert_null(a->window);
+  g_assert_true(gtk_widget_get_visible(a->widget));
+  gtk_widget_destroy(h);
+  spin(100);
+  g_test_message("PASS late GTK/desktop application IDs distinguish shared "
+                 "window classes; workspace changes reuse the current window "
+                 "without duplicates and the app menu selects other windows");
+  g_remove(first);
+  g_remove(second);
+  g_remove(rc);
+  g_rmdir(dir);
+  g_free(dir);
+  g_free(rc);
+  g_free(first);
+  g_free(second);
+}
+static void improvements(void) {
+  gchar *dir = g_dir_make_tmp("zero-dock-improve-XXXXXX", NULL);
+  gchar *rc = g_build_filename(dir, "settings.rc", NULL),
+        *desktop = g_build_filename(dir, "manual.desktop", NULL),
+        *backup = g_build_filename(dir, "backup.rc", NULL),
+        *bad = g_build_filename(dir, "bad.rc", NULL);
+  g_assert_true(g_file_set_contents(
+      desktop,
+      "[Desktop Entry]\nType=Application\nName=Manual "
+      "association\nExec=/usr/bin/true\nStartupWMClass=DistinctManual\n",
+      -1, NULL));
+  GtkWidget *h;
+  XfcePanelPlugin *p = host(rc, 9040, &h);
+  ZdDock *d = zd_get_dock(p);
+  ZdButton *pin = zd_add_pin(d, desktop);
+  GtkWidget *first = fixture("Manual association fixture");
+  spin(200);
+  ZdButton *running = button(d, first);
+  XfwWindow *window = g_object_ref(running->window);
+  GError *error = NULL;
+  g_assert_false(zd_associate(d, window, "/missing.desktop", &error));
+  g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT);
+  g_clear_error(&error);
+  g_assert_cmpuint(g_hash_table_size(d->associations), ==, 0);
+  g_assert_true(zd_associate(d, window, desktop, &error));
+  spin(150);
+  g_assert_true(button(d, first) == pin);
+  g_assert_true(gtk_widget_get_can_focus(pin->main));
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 1);
+  d->max_visible = 3;
+  d->left_action = 1;
+  d->middle_action = 2;
+  d->scroll_windows = FALSE;
+  GtkWidget *others[7];
+  for (guint i = 0; i < G_N_ELEMENTS(others); i++)
+    others[i] = fixture("Overflow fixture");
+  spin(400);
+  guint visible = 0;
+  for (GList *l = d->buttons; l; l = l->next)
+    visible += gtk_widget_get_visible(((ZdButton *)l->data)->widget);
+  g_assert_cmpuint(visible, ==, 2);
+  g_assert_true(gtk_widget_get_visible(d->overflow));
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 8);
+  zd_overflow_menu(d, NULL);
+  GList *items = gtk_container_get_children(GTK_CONTAINER(d->menu));
+  g_assert_cmpuint(g_list_length(items), ==, 6);
+  ZdButton *last = button(d, others[6]);
+  const gchar *target_key = g_strdup(last->key);
+  for (GList *l = items; l; l = l->next)
+    if (!g_strcmp0(g_object_get_data(G_OBJECT(l->data), "button-key"),
+                   target_key)) {
+      g_signal_emit_by_name(l->data, "activate");
+      break;
+    }
+  g_free((gpointer)target_key);
+  g_list_free(items);
+  if (d->menu)
+    gtk_widget_destroy(d->menu);
+  spin(100);
+  g_assert_true(xfw_window_is_active(last->window));
+  gtk_button_clicked(GTK_BUTTON(last->main));
+  spin(100);
+  g_assert_false(xfw_window_is_minimized(last->window));
+  gtk_widget_grab_focus(pin->main);
+  GdkEventKey key = {.type = GDK_KEY_PRESS, .keyval = GDK_KEY_End};
+  gboolean handled = FALSE;
+  g_signal_emit_by_name(pin->main, "key-press-event", &key, &handled);
+  g_assert_true(handled);
+  g_assert_true(gtk_window_get_focus(GTK_WINDOW(h)) == d->overflow);
+  key.keyval = GDK_KEY_Home;
+  g_signal_emit_by_name(d->overflow, "key-press-event", &key, &handled);
+  g_assert_true(gtk_window_get_focus(GTK_WINDOW(h)) == pin->main);
+  g_assert_true(zd_config_export(d, backup, &error));
+  zd_association_clear(pin);
+  d->max_visible = 0;
+  zd_settings_defaults(d);
+  g_assert_true(zd_config_import(d, backup, &error));
+  spin(150);
+  g_assert_cmpuint(d->max_visible, ==, 3);
+  g_assert_cmpuint(d->left_action, ==, 1);
+  g_assert_cmpuint(d->middle_action, ==, 2);
+  g_assert_false(d->scroll_windows);
+  g_assert_cmpuint(g_hash_table_size(d->associations), ==, 1);
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 8);
+  pin = button(d, first);
+  g_assert_true(pin->pinned);
+  gchar *before = NULL, *after = NULL;
+  g_assert_true(g_file_get_contents(rc, &before, NULL, NULL));
+  g_assert_true(g_file_set_contents(bad, "[Other]\nKey=bad\n", -1, NULL));
+  g_assert_false(zd_config_import(d, bad, &error));
+  g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA);
+  g_clear_error(&error);
+  g_assert_true(g_file_get_contents(rc, &after, NULL, NULL));
+  g_assert_cmpstr(before, ==, after);
+  g_free(before);
+  g_free(after);
+  d->max_visible = 1;
+  zd_update_buttons(d);
+  g_assert_false(gtk_widget_get_visible(pin->widget));
+  g_assert_true(gtk_widget_get_visible(d->overflow));
+  d->max_visible = 0;
+  zd_update_buttons(d);
+  zd_preview_schedule(pin);
+  spin(500);
+  g_assert_true(gtk_widget_get_visible(d->preview));
+  g_assert_nonnull(d->preview_close);
+  GtkSettings *theme = gtk_settings_get_default();
+  g_object_set(theme, "gtk-theme-name", "Adwaita",
+               "gtk-application-prefer-dark-theme", FALSE, NULL);
+  spin(150);
+  evidence(d->preview, "0.3-light-preview.png");
+  GdkRGBA light, dark;
+  g_assert_true(gtk_style_context_lookup_color(
+      gtk_widget_get_style_context(d->preview), "theme_bg_color", &light));
+  g_object_set(theme, "gtk-application-prefer-dark-theme", TRUE, NULL);
+  spin(150);
+  evidence(d->preview, "0.3-dark-preview.png");
+  g_assert_true(gtk_style_context_lookup_color(
+      gtk_widget_get_style_context(d->preview), "theme_bg_color", &dark));
+  g_assert_cmpfloat(light.red, >, dark.red);
+  g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(d->preview_title)), ==,
+                  "Manual association fixture");
+  g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(d->preview_workspace)), !=, "");
+  gint x, y, width, height;
+  gtk_window_get_position(GTK_WINDOW(d->preview), &x, &y);
+  gtk_window_get_size(GTK_WINDOW(d->preview), &width, &height);
+  GdkRectangle bounds;
+  GdkMonitor *monitor = gdk_display_get_monitor_at_window(
+      gdk_display_get_default(), gtk_widget_get_window(h));
+  gdk_monitor_get_workarea(monitor, &bounds);
+  g_assert_cmpint(x, >=, bounds.x);
+  g_assert_cmpint(y, >=, bounds.y);
+  g_assert_cmpint(x + width, <=, bounds.x + bounds.width);
+  g_assert_cmpint(y + height, <=, bounds.y + bounds.height);
+  g_signal_emit_by_name(d->screen, "monitors-changed");
+  g_assert_null(d->hover_button);
+  g_assert_false(d->autohide_blocked);
+  xfce_panel_plugin_provider_set_mode(XFCE_PANEL_PLUGIN_PROVIDER(p),
+                                      XFCE_PANEL_PLUGIN_MODE_VERTICAL);
+  zd_preview_schedule(pin);
+  spin(500);
+  gtk_window_get_position(GTK_WINDOW(d->preview), &x, &y);
+  gtk_window_get_size(GTK_WINDOW(d->preview), &width, &height);
+  g_assert_cmpint(x, >=, bounds.x);
+  g_assert_cmpint(y, >=, bounds.y);
+  g_assert_cmpint(x + width, <=, bounds.x + bounds.width);
+  g_assert_cmpint(y + height, <=, bounds.y + bounds.height);
+  for (GList *l = d->buttons; l; l = l->next) {
+    ZdButton *b = l->data;
+    g_clear_object(&b->thumbnail);
+    b->thumbnail = gdk_pixbuf_new(GDK_COLORSPACE_RGB, TRUE, 8, 2048, 1024);
+  }
+  zd_trim_frames(d, pin);
+  gsize total = 0;
+  for (GList *l = d->buttons; l; l = l->next) {
+    ZdButton *b = l->data;
+    if (b->thumbnail)
+      total += gdk_pixbuf_get_byte_length(b->thumbnail);
+  }
+  g_assert_cmpuint(total, <=, 32 * 1024 * 1024);
+  g_assert_nonnull(pin->thumbnail);
+  XfwWindow *closing = g_object_ref(pin->window);
+  gtk_button_clicked(GTK_BUTTON(d->preview_close));
+  spin(200);
+  g_assert_false(g_hash_table_contains(d->windows, closing));
+  g_object_unref(closing);
+  g_assert_cmpuint(g_hash_table_size(d->windows), ==, 7);
+  g_assert_nonnull(pin->window);
+  g_assert_false(d->autohide_blocked);
+  g_object_unref(window);
+  for (guint i = 0; i < G_N_ELEMENTS(others); i++)
+    gtk_widget_destroy(others[i]);
+  spin(200);
+  gtk_widget_destroy(h);
+  spin(100);
+  p = host(rc, 9041, &h);
+  d = zd_get_dock(p);
+  first = fixture("Rule restored after reload");
+  spin(200);
+  g_assert_true(button(d, first)->pinned);
+  g_assert_cmpuint(g_hash_table_size(d->associations), ==, 1);
+  g_test_message(
+      "PASS manual rules survive reload; overflow selection, focus navigation, "
+      "click settings, safe configuration restore, monitor invalidation, both "
+      "popup orientations and 32 MiB frame cache budget (scale %d)",
+      gtk_widget_get_scale_factor(d->box));
+  gtk_widget_destroy(first);
+  gtk_widget_destroy(h);
+  spin(100);
+  GDir *directory = g_dir_open(dir, 0, NULL);
+  const gchar *name;
+  while ((name = g_dir_read_name(directory))) {
+    gchar *file = g_build_filename(dir, name, NULL);
+    g_remove(file);
+    g_free(file);
+  }
+  g_dir_close(directory);
+  g_rmdir(dir);
+  g_free(dir);
+  g_free(rc);
+  g_free(desktop);
+  g_free(backup);
+  g_free(bad);
+}
+
+static guint resident_kib(void) {
+  gchar *text = NULL;
+  guint rss = 0;
+  if (g_file_get_contents("/proc/self/status", &text, NULL, NULL)) {
+    gchar *line = strstr(text, "VmRSS:");
+    if (line)
+      sscanf(line, "VmRSS: %u", &rss);
+  }
+  g_free(text);
+  return rss;
+}
+static void stress(void) {
+  guint seconds =
+      g_getenv("ZERO_DOCK_SOAK_SECONDS")
+          ? g_ascii_strtoull(g_getenv("ZERO_DOCK_SOAK_SECONDS"), NULL, 10)
+          : 0;
+  if (!seconds) {
+    g_test_skip("Enable with --soak-seconds; use 86400 for a 24-hour run");
+    return;
+  }
+  gchar *dir = g_dir_make_tmp("zero-dock-stress-XXXXXX", NULL),
+        *rc = g_build_filename(dir, "settings.rc", NULL);
+  GtkWidget *h;
+  XfcePanelPlugin *p = host(rc, 9050, &h);
+  ZdDock *d = zd_get_dock(p);
+  guint initial = resident_kib(), warm = 0, peak = initial, cycles = 0;
+  gint64 start = g_get_monotonic_time(),
+         end = start + (gint64)seconds * G_USEC_PER_SEC;
+  do {
+    GtkWidget *windows[32];
+    for (guint i = 0; i < G_N_ELEMENTS(windows); i++)
+      windows[i] = fixture("Stress fixture");
+    spin(250);
+    g_assert_cmpuint(g_hash_table_size(d->windows), ==, 32);
+    g_assert_true(gtk_widget_get_visible(d->overflow));
+    for (guint i = 0; i < 8; i++) {
+      GdkPixbuf *frame = zd_capture(button(d, windows[i]));
+      g_clear_object(&frame);
+    }
+    for (guint i = 0; i < 30; i++) {
+      zd_update_audio_buttons(d);
+      zd_update_buttons(d);
+    }
+    peak = MAX(peak, resident_kib());
+    for (guint i = 0; i < G_N_ELEMENTS(windows); i++)
+      gtk_widget_destroy(windows[i]);
+    spin(150);
+    g_assert_cmpuint(g_hash_table_size(d->windows), ==, 0);
+    g_assert_null(d->buttons);
+    g_assert_null(d->hover_button);
+    g_assert_false(d->autohide_blocked);
+    cycles++;
+    if (cycles == 5)
+      warm = resident_kib();
+  } while (g_get_monotonic_time() < end);
+  guint final = resident_kib();
+  struct rusage cpu_before, cpu_after;
+  getrusage(RUSAGE_SELF, &cpu_before);
+  gint64 idle_start = g_get_monotonic_time();
+  spin(10000);
+  getrusage(RUSAGE_SELF, &cpu_after);
+  double cpu_us = (cpu_after.ru_utime.tv_sec - cpu_before.ru_utime.tv_sec +
+                   cpu_after.ru_stime.tv_sec - cpu_before.ru_stime.tv_sec) *
+                      1000000. +
+                  cpu_after.ru_utime.tv_usec - cpu_before.ru_utime.tv_usec +
+                  cpu_after.ru_stime.tv_usec - cpu_before.ru_stime.tv_usec;
+  g_test_message("Idle CPU after stress: %.3f%% over 10 s",
+                 100. * cpu_us / (g_get_monotonic_time() - idle_start));
+  g_assert_cmpuint(final, <, MAX(warm, initial) + 128 * 1024);
+  g_test_message("Lifecycle stress: %.1f s, %u cycles, %u created/closed "
+                 "windows; RSS initial=%u warm=%u final=%u peak=%u KiB",
+                 (g_get_monotonic_time() - start) / 1000000., cycles,
+                 cycles * 32, initial, warm, final, peak);
+  gtk_widget_destroy(h);
+  spin(100);
+  g_remove(rc);
+  g_rmdir(dir);
+  g_free(rc);
+  g_free(dir);
+}
+static void audio_recovery(void) {
+  const gchar *server = g_getenv("ZERO_DOCK_PRIVATE_PULSE_PID");
+  if (!server) {
+    g_test_skip("Requires --private-audio; never disconnect the user's server");
+    return;
+  }
+  GPid pulse_pid = g_ascii_strtoull(server, NULL, 10);
+  gchar *proc = g_strdup_printf("/proc/%d/cmdline", pulse_pid), *cmdline = NULL;
+  g_assert_true(g_file_get_contents(proc, &cmdline, NULL, NULL));
+  g_assert_nonnull(strstr(cmdline, "pipewire-pulse"));
+  g_free(proc);
+  g_free(cmdline);
+  gchar *dir = g_dir_make_tmp("zero-dock-recovery-XXXXXX", NULL),
+        *rc = g_build_filename(dir, "settings.rc", NULL);
+  GtkWidget *h, *w = fixture("Private audio recovery fixture");
+  XfcePanelPlugin *p = host(rc, 9060, &h);
+  ZdDock *d = zd_get_dock(p);
+  spin(200);
+  ZdButton *b = button(d, w);
+  gchar *stream_args[] = {"/usr/bin/pacat", "--playback",   "--raw",
+                          "--rate=8000",    "--channels=1", "--format=s16le",
+                          "--volume=0",     "/dev/zero",    NULL};
+  GPid stream;
+  g_assert_true(g_spawn_async(NULL, stream_args, NULL,
+                              G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL, &stream,
+                              NULL));
+  spin(600);
+  g_assert_true(zd_audio_status(b).present);
+  for (guint cycle = 0; cycle < 2; cycle++) {
+    kill(pulse_pid, SIGTERM);
+    if (cycle) {
+      waitpid(pulse_pid, NULL, 0);
+      g_spawn_close_pid(pulse_pid);
+    }
+    spin(500);
+    g_assert_false(zd_audio_status(b).present);
+    g_assert_false(gtk_widget_get_visible(b->sound));
+    kill(stream, SIGTERM);
+    waitpid(stream, NULL, 0);
+    g_spawn_close_pid(stream);
+    gchar *pulse_args[] = {"/usr/bin/pipewire-pulse", NULL};
+    g_assert_true(g_spawn_async(NULL, pulse_args, NULL,
+                                G_SPAWN_DO_NOT_REAP_CHILD |
+                                    G_SPAWN_STDOUT_TO_DEV_NULL |
+                                    G_SPAWN_STDERR_TO_DEV_NULL,
+                                NULL, NULL, &pulse_pid, NULL));
+    spin(800);
+    gchar *sink_args[] = {"/usr/bin/pactl", "load-module", "module-null-sink",
+                          "sink_name=zero-dock-recovery", NULL};
+    gint status;
+    g_assert_true(
+        g_spawn_sync(NULL, sink_args, NULL,
+                     G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
+                     NULL, NULL, NULL, NULL, &status, NULL));
+    g_assert_true(g_spawn_check_wait_status(status, NULL));
+    gchar *default_args[] = {"/usr/bin/pactl", "set-default-sink",
+                             "zero-dock-recovery", NULL};
+    g_assert_true(g_spawn_sync(NULL, default_args, NULL,
+                               G_SPAWN_STDOUT_TO_DEV_NULL, NULL, NULL, NULL,
+                               NULL, &status, NULL));
+    g_assert_true(g_spawn_check_wait_status(status, NULL));
+    g_assert_true(g_spawn_async(NULL, stream_args, NULL,
+                                G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL, &stream,
+                                NULL));
+    spin(4500);
+    g_assert_true(zd_audio_status(b).present);
+    gboolean muted = zd_audio_status(b).muted;
+    zd_audio_mute(b);
+    spin(150);
+    g_assert_cmpint(zd_audio_status(b).muted, ==, !muted);
+  }
+  kill(stream, SIGTERM);
+  waitpid(stream, NULL, 0);
+  g_spawn_close_pid(stream);
+  gtk_widget_destroy(w);
+  gtk_widget_destroy(h);
+  spin(100);
+  kill(pulse_pid, SIGTERM);
+  waitpid(pulse_pid, NULL, 0);
+  g_spawn_close_pid(pulse_pid);
+  g_test_message("PASS two private audio server shutdown/restart cycles clear "
+                 "stale badges and restore stream controls");
+  g_remove(rc);
+  g_rmdir(dir);
+  g_free(rc);
+  g_free(dir);
+}
+static void real_apps(void) {
+  if (g_strcmp0(g_getenv("ZERO_DOCK_REAL_APPS"), "1")) {
+    g_test_skip(
+        "Enable with --real-apps; apps run only on the isolated display");
+    return;
+  }
+  const gchar *desktops[] = {"/usr/share/applications/google-chrome.desktop",
+                             "/usr/share/applications/thunar.desktop"};
+  for (guint app = 0; app < 2; app++) {
+    if (!g_file_test(desktops[app], G_FILE_TEST_IS_REGULAR)) {
+      g_test_message("Desktop entry unavailable: %s",
+                     app ? "Thunar" : "Chrome");
+      continue;
+    }
+    gchar *dir = g_dir_make_tmp("zero-dock-real-app-XXXXXX", NULL),
+          *rc = g_build_filename(dir, "settings.rc", NULL);
+    GtkWidget *h;
+    XfcePanelPlugin *p = host(rc, 9070 + app, &h);
+    ZdDock *d = zd_get_dock(p);
+    ZdButton *pin = zd_add_pin(d, desktops[app]);
+    g_assert_nonnull(pin->app);
+    gchar *profile = g_strdup_printf("--user-data-dir=%s/profile", dir);
+    gchar *chrome_args[] = {"/usr/bin/google-chrome-stable",
+                            profile,
+                            "--no-first-run",
+                            "--no-default-browser-check",
+                            "--disable-background-networking",
+                            "--disable-component-update",
+                            "--disable-sync",
+                            "--disable-extensions",
+                            "--disable-gpu",
+                            "--password-store=basic",
+                            "--new-window",
+                            "about:blank",
+                            NULL};
+    gchar *thunar_args[] = {"/usr/bin/thunar", dir, NULL};
+    GPid child;
+    g_assert_true(g_spawn_async(NULL, app ? thunar_args : chrome_args, NULL,
+                                G_SPAWN_DO_NOT_REAP_CHILD |
+                                    G_SPAWN_STDOUT_TO_DEV_NULL |
+                                    G_SPAWN_STDERR_TO_DEV_NULL,
+                                NULL, NULL, &child, NULL));
+    for (guint retry = 0; retry < 60 && !pin->window; retry++)
+      spin(100);
+    g_assert_nonnull(pin->window);
+    g_assert_cmpuint(g_hash_table_size(d->windows), ==, 1);
+    zd_activate(pin);
+    spin(100);
+    zd_minimize(pin);
+    spin(100);
+    g_assert_true(xfw_window_is_minimized(pin->window));
+    zd_activate(pin);
+    spin(100);
+    g_assert_false(xfw_window_is_minimized(pin->window));
+    GPid second;
+    g_assert_true(g_spawn_async(NULL, app ? thunar_args : chrome_args, NULL,
+                                G_SPAWN_DO_NOT_REAP_CHILD |
+                                    G_SPAWN_STDOUT_TO_DEV_NULL |
+                                    G_SPAWN_STDERR_TO_DEV_NULL,
+                                NULL, NULL, &second, NULL));
+    for (guint retry = 0; retry < 50 && g_hash_table_size(d->windows) < 2;
+         retry++)
+      spin(100);
+    g_assert_cmpuint(g_hash_table_size(d->windows), ==, 2);
+    zd_close_window(pin);
+    spin(400);
+    g_assert_nonnull(pin->window);
+    g_assert_cmpuint(g_hash_table_size(d->windows), ==, 1);
+    zd_close_window(pin);
+    spin(400);
+    g_assert_null(pin->window);
+    g_assert_cmpuint(g_hash_table_size(d->windows), ==, 0);
+    kill(child, SIGTERM);
+    waitpid(child, NULL, 0);
+    g_spawn_close_pid(child);
+    waitpid(second, NULL, 0);
+    g_spawn_close_pid(second);
+    gtk_widget_destroy(h);
+    spin(100);
+    g_test_message(
+        "PASS installed %s: pin reuse, two independent windows, "
+        "minimize/restore, transfer after close and return to launcher",
+        app ? "Thunar" : "Chrome (disposable profile)");
+    g_remove(rc);
+    // Browser profile removal is restricted to the temporary directory created
+    // here.
+    gchar *remove_args[] = {"/usr/bin/rm", "-rf", "--", dir, NULL};
+    g_spawn_sync(NULL, remove_args, NULL, 0, NULL, NULL, NULL, NULL, NULL,
+                 NULL);
+    g_free(profile);
+    g_free(rc);
+    g_free(dir);
+  }
+}
+
 int main(int argc, char **argv) {
+  if (argc == 2 && g_str_has_prefix(argv[1], "--launch-fixture")) {
+    if (g_str_has_prefix(argv[1], "--launch-fixture="))
+      g_usleep(
+          MIN(g_ascii_strtoull(argv[1] + strlen("--launch-fixture="), NULL, 10),
+              5000) *
+          1000);
+    gtk_init(&argc, &argv);
+    GtkWidget *w = fixture("Launched Zero Dock fixture");
+    g_signal_connect(w, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+    gtk_main();
+    return 0;
+  }
   g_test_init(&argc, &argv, NULL);
   gtk_init(&argc, &argv);
   g_assert_nonnull(g_getenv("ZERO_DOCK_ISOLATED_TEST"));
   g_test_add_func("/integration/native-all", all);
   g_test_add_func("/integration/external-wrappers", external);
+  g_test_add_func("/integration/pinned-lifecycle", pinned_lifecycle);
+  g_test_add_func("/integration/launch-feedback", launch_feedback);
+  g_test_add_func("/integration/identity-workspaces", identity_workspaces);
+  g_test_add_func("/integration/improvements", improvements);
+  g_test_add_func("/integration/stress", stress);
+  g_test_add_func("/integration/audio-recovery", audio_recovery);
+  g_test_add_func("/integration/real-apps", real_apps);
   return g_test_run();
 }

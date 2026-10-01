@@ -1,4 +1,46 @@
-# Zero Dock 0.1.0 验收记录
+# Zero Dock 验收记录
+
+## 0.3.0 七项方向落地验证
+
+2026-10-01，Arch/CachyOS、XFCE 4.20、GTK 3.24、X11，本机验证：
+
+- `--werror` 编译、6 项单元检查、C 格式、Python 语法、gettext 与 diff 空白检查通过。
+- 标准隔离套件的 6 项路径通过：原生操作、外部 wrapper、固定图标生命周期、启动反馈、应用身份/工作区和本轮交互完善。另三项耗时或依赖环境的路径按开关独立执行，不把默认跳过算作实测通过。
+- 本轮完善路径验证手动关联优先级及重载保存、固定图标重新绑定、溢出选择及只保留溢出按钮的单槽极限、从普通按钮到溢出按钮的键盘焦点导航、鼠标行为设置、配置备份恢复与运行窗口保留、无效恢复不修改原配置、预览关闭后窗口接替、32 MiB 缓存预算、横/竖面板边界和监视器变化后的弹层关闭。
+- 同一路径在均匀 1 倍和 2 倍缩放下通过。Adwaita 浅色/深色主题色检查通过，合成窗口预览截图已视觉核验；文档中的预览图更新为本轮界面。
+- 安装的 Chrome 154（临时配置）和 Thunar 4.20.10 在隔离桌面执行真实双窗口回归，验证固定位置复用、独立第二窗口、最小化/恢复、关闭后接替及最后恢复启动器。没有使用或关闭用户的浏览器窗口。
+- 当前桌面只读关联检查记录：Chrome 1/1、Thunar 2/2、Codex 1/1 窗口可关联桌面文件；Steam 没有运行窗口，Flatpak 没有已安装应用。这是现有元数据检查，不代表 Codex 的完整交互回归或 Steam/Flatpak 实际应用通过。
+- 使用独立 PipeWire、pipewire-pulse、仅策略模式 WirePlumber 和空音频输出，两次关闭/重启私有音频服务器后，失效徽章清除、流重新出现及静音切换通过。用户的音频服务保持运行。
+- 本轮 181.1 秒压力阶段完成 98 轮、3,136 个窗口创建/关闭，RSS 预热后 54,504 KiB，结束 54,844 KiB。最终 60 秒压力阶段另完成 26 轮、832 个窗口，RSS 预热后 54,488 KiB，结束 54,688 KiB，峰值 56,716 KiB；随后十秒空闲 CPU 测量为 0.403%。这些是本机样本，不是所有机器的性能承诺。
+- ASan + UBSan 下 `/integration/native-all`、`pinned-lifecycle`、`launch-feedback`、`identity-workspaces`、`improvements`、`audio-recovery` 六条路径通过。第三方 GTK 进程级泄漏统计关闭，外部 wrapper 与 Chrome 不计入 sanitizer 覆盖。
+
+已提供最长 24 小时的压力入口，但本次没有完成 24 小时运行、真实休眠唤醒、多显示器混合 DPI 或硬件热插拔。实际 Steam/Wine/gamescope、Flatpak 与特殊浏览器配置仍需对应样例。实现、实测和边界分别见 [完善路线](docs/ROADMAP.md)、[测试命令](docs/TESTING.md)。
+
+## 0.2.0 完善验证
+
+2026-10-01，后续源码修改的本机验证：
+
+- `meson compile -C build-dev` 开启 `--werror` 通过；`meson test -C build-dev --print-errorlogs` 的 6 项单元检查通过；C 格式、Python 语法和 diff 空白检查通过。
+- `python tests/run-isolated.py build-dev` 的 5 项集成检查通过：原有原生操作、真正的 XFCE 外部 wrapper、固定图标生命周期、启动反馈及应用身份/工作区。
+- 新增检查通过实际 `.desktop` 启动独立 GTK 测试进程，验证单窗口复用原按钮、左键激活/最小化、中键第二窗口、关闭后剩余窗口与缓存接替固定位置、最后关闭恢复启动器、运行时取消固定、固定顺序恢复及配置重复项去除。
+- 额外验证窗口类变化及晚到身份信息的重新绑定，无法匹配的窗口仍保持独立按钮。
+- 慢启动连续左键不重复提交进程；无窗口启动超时后可重试；启动失败显示原生错误；失效固定项仍写入配置。属性控件保存预览参数，恢复默认值保留固定应用。语法损坏的配置先完整备份再使用默认值。
+- 应用共享 WM_CLASS 时，晚到的 GTK/application desktop ID 可重新绑定到正确桌面文件；跨工作区移动、激活及菜单选择均保持独立窗口与固定位置，不创建多余启动器。
+- 连续 100 次音频控件更新保留同一窗口图标对象；窗口图标变化后正确失效。此测试验证缓存路径，不作为所有机器的 CPU 占用或混合 DPI 性能保证。
+- `msgfmt --check` 通过，Python gettext 成功读取英文目录并确认启动状态及启动菜单译文；版本取自 Meson 的 0.2.0。
+- AddressSanitizer + UndefinedBehaviorSanitizer 下，`/integration/native-all`、`/integration/pinned-lifecycle`、`/integration/launch-feedback` 与 `/integration/identity-workspaces` 均通过；GTK 进程级泄漏报告关闭，外部 wrapper 的 sanitizer 覆盖范围未扩展。
+
+上述自动测试使用隔离桌面与合成应用。真实浏览器、多配置启动器、Flatpak、Steam/Wine、多显示器与长时间使用仍需专项验证。后续方向见 [完善记录](docs/ROADMAP.md)。
+
+### 本机安装与单实例更新
+
+本轮从实际发布源码归档构建 `xfce4-zero-dock-plugin 0.2.0-1`，包内单元检查通过，并通过 pacman 安装。`pacman -Qkk` 检查 36 个包文件，无修改项。
+
+安装后保存并备份配置，只重新加载 Zero Dock 实例 11。替换后的 wrapper 已映射新安装的共享库，主面板进程持续运行，插件 ID 与面板排列保持不变。原有 Thunar、Chrome、Steam 三个固定项及预览、序号、工作区、宽度和槽位设置均保留；新增设置使用默认值。此项确认实际桌面升级和配置保留，不作为这三个应用的全部功能兼容测试。
+
+配置与升级前共享库备份保存在本机 `~/.local/state/zero-dock/`，不收入源码归档。重载方法与适用范围见 [安装指南](docs/INSTALL.md)。
+
+## 0.1.0 初始验收
 
 2026-10-01，CachyOS / XFCE 4.20 / GTK 3.24.52 / libxfce4windowing 4.20.7。
 

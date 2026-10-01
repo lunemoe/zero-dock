@@ -1,0 +1,394 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR Zero Dock contributors
+# This file is distributed under the same license as the zero-dock package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: zero-dock 0.3.0\n"
+"Report-Msgid-Bugs-To: https://github.com/lunemoe/zero-dock/issues\n"
+"POT-Creation-Date: 2026-10-01 11:53+0800\n"
+"PO-Revision-Date: 2026-10-01 11:00+0800\n"
+"Last-Translator: Zero Dock contributors\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/plugin.c:325
+msgid "Zero Dock 窗口停靠"
+msgstr "Zero Dock Window Dock"
+
+#: src/plugin.c:327
+msgid ""
+"XFCE 原生面板插件 · C / GTK3 / X11\n"
+"独立窗口、固定应用、预览与应用音量控制"
+msgstr ""
+"Native XFCE panel plugin · C / GTK3 / X11\n"
+"Independent windows, pinned apps, previews and application audio"
+
+#: src/plugin.c:381
+msgid "Zero Dock 需要 X11"
+msgstr "Zero Dock requires X11"
+
+#: src/apps.c:158
+msgid "启动请求已发送，但未检测到新窗口。可再次点击重试。"
+msgstr ""
+"Launch requested, but no new window was detected. Click again to retry."
+
+#: src/apps.c:201
+msgid "启动器文件已失效，请重新拖入该应用的 .desktop 文件。"
+msgstr ""
+"The launcher file is unavailable. Drop the application’s .desktop file onto "
+"the dock again."
+
+#: src/apps.c:220
+#, c-format
+msgid "无法启动应用：%s"
+msgstr "Unable to launch application: %s"
+
+#: src/settings.c:22
+msgid "配置文件无法读取，已保留原文件备份并使用默认设置。"
+msgstr ""
+"The configuration could not be read. A backup was saved and defaults are in "
+"use."
+
+#: src/settings.c:23
+msgid "配置文件无法读取，设置暂不保存。请修复配置后重新加载插件。"
+msgstr ""
+"The configuration could not be read. Saving is disabled. Repair it and "
+"reload the plugin."
+
+#: src/settings.c:113
+msgid "Zero Dock 提示"
+msgstr "Zero Dock"
+
+#: src/settings.c:179 src/settings.c:460
+msgid "导出诊断信息"
+msgstr "Export diagnostics"
+
+#: src/settings.c:180 src/settings.c:347 src/associations.c:105
+msgid "取消"
+msgstr "Cancel"
+
+#: src/settings.c:180 src/settings.c:347
+msgid "保存"
+msgstr "Save"
+
+#: src/settings.c:201
+msgid "当前配置不可保存，请先修复配置文件。"
+msgstr ""
+"The current configuration cannot be saved. Repair the configuration file "
+"first."
+
+#: src/settings.c:206
+msgid "无法保存当前配置，未创建备份。"
+msgstr "The current configuration could not be saved. No backup was created."
+
+#: src/settings.c:223
+msgid "配置必须是小于 1 MiB 的普通文件。"
+msgstr "Configuration must be a regular file smaller than 1 MiB."
+
+#: src/settings.c:268
+msgid "所选文件不是有效的 Zero Dock 配置。"
+msgstr "The selected file is not a valid Zero Dock configuration."
+
+#: src/settings.c:344
+msgid "恢复 Zero Dock 配置"
+msgstr "Restore Zero Dock configuration"
+
+#: src/settings.c:344
+msgid "备份 Zero Dock 配置"
+msgstr "Back up Zero Dock configuration"
+
+#: src/settings.c:347
+msgid "恢复"
+msgstr "Restore"
+
+#: src/settings.c:356
+msgid "恢复固定应用、手动关联与设置；恢复前自动备份当前配置。"
+msgstr ""
+"Restore pinned apps, manual associations and settings. The current "
+"configuration is backed up before restoring."
+
+#: src/settings.c:357
+msgid "备份包含固定启动器和手动关联的本机文件路径。"
+msgstr ""
+"The backup includes local paths for pinned launchers and manual associations."
+
+#: src/settings.c:372
+msgid "Zero Dock 设置"
+msgstr "Zero Dock preferences"
+
+#: src/settings.c:372
+msgid "关闭"
+msgstr "Close"
+
+#: src/settings.c:396
+msgid "显示可点击的窗口预览"
+msgstr "Show clickable window previews"
+
+#: src/settings.c:396
+msgid "同应用多窗口显示序号"
+msgstr "Number multiple windows of the same app"
+
+#: src/settings.c:397
+msgid "显示所有工作区的窗口"
+msgstr "Show windows from all workspaces"
+
+#: src/settings.c:397
+msgid "滚轮切换窗口"
+msgstr "Use the scroll wheel to switch windows"
+
+#: src/settings.c:408
+msgid "预留图标位置（0 为自动宽度）"
+msgstr "Reserved icon slots (0 for automatic width)"
+
+#: src/settings.c:409
+msgid "预览宽度（像素）"
+msgstr "Preview width (pixels)"
+
+#: src/settings.c:410
+msgid "悬停延时（毫秒）"
+msgstr "Hover delay (milliseconds)"
+
+#: src/settings.c:411
+msgid "预览刷新间隔（毫秒）"
+msgstr "Preview refresh interval (milliseconds)"
+
+#: src/settings.c:412
+msgid "启动等待时间（毫秒）"
+msgstr "Launch wait timeout (milliseconds)"
+
+#: src/settings.c:413
+msgid "最多显示图标数（含溢出按钮，0 为不限）"
+msgstr "Maximum visible icons (including overflow; 0 for unlimited)"
+
+#: src/settings.c:430
+msgid "左键行为"
+msgstr "Left click action"
+
+#: src/settings.c:430
+msgid "中键行为"
+msgstr "Middle click action"
+
+#: src/settings.c:431
+msgid "激活 / 最小化"
+msgstr "Activate / minimize"
+
+#: src/settings.c:431
+msgid "仅激活"
+msgstr "Activate only"
+
+#: src/settings.c:432 src/menu.c:202 src/menu.c:241
+msgid "启动新窗口"
+msgstr "Launch new window"
+
+#: src/settings.c:432 src/menu.c:214 src/preview.c:366 src/preview.c:368
+msgid "关闭窗口"
+msgstr "Close window"
+
+#: src/settings.c:432
+msgid "不操作"
+msgstr "Do nothing"
+
+#: src/settings.c:449
+msgid "备份配置…"
+msgstr "Back up configuration…"
+
+#: src/settings.c:449
+msgid "恢复配置…"
+msgstr "Restore configuration…"
+
+#: src/settings.c:459
+msgid "恢复默认设置（保留固定应用）"
+msgstr "Restore defaults (keep pinned apps)"
+
+#: src/settings.c:466
+msgid ""
+"固定图标复用首个窗口，其他窗口独立显示。\n"
+"拖入 .desktop 文件可固定应用。\n"
+"喇叭滚轮调整应用音量，最高 200%。\n"
+"预览画面仅保存在内存中。"
+msgstr ""
+"The first window reuses its pinned icon; other windows stay separate.\n"
+"Drop .desktop files to pin apps.\n"
+"Scroll over a speaker to adjust app volume, up to 200%.\n"
+"Preview frames stay in memory."
+
+#: src/buttons.c:605
+msgid "取消应用静音 · 滚轮调音量"
+msgstr "Unmute app · Scroll to adjust volume"
+
+#: src/buttons.c:606
+msgid "应用静音 · 滚轮调音量"
+msgstr "Mute app · Scroll to adjust volume"
+
+#: src/buttons.c:668 src/layout.c:94
+msgid "启动器文件已失效"
+msgstr "Launcher file unavailable"
+
+#: src/buttons.c:669
+msgid "正在启动…"
+msgstr "Launching…"
+
+#: src/menu.c:130 src/menu.c:131 src/layout.c:98 src/layout.c:99
+msgid "无标题窗口"
+msgstr "Untitled window"
+
+#: src/menu.c:143
+msgid "本应用的窗口"
+msgstr "Windows of this app"
+
+#: src/menu.c:161
+msgid "恢复窗口"
+msgstr "Restore window"
+
+#: src/menu.c:161
+msgid "最小化"
+msgstr "Minimize"
+
+#: src/menu.c:165
+msgid "还原大小"
+msgstr "Unmaximize"
+
+#: src/menu.c:165
+msgid "最大化"
+msgstr "Maximize"
+
+#: src/menu.c:169
+msgid "退出全屏"
+msgstr "Leave fullscreen"
+
+#: src/menu.c:169
+msgid "全屏"
+msgstr "Fullscreen"
+
+#: src/menu.c:173
+msgid "取消置顶"
+msgstr "Disable always on top"
+
+#: src/menu.c:173
+msgid "置顶"
+msgstr "Always on top"
+
+#: src/menu.c:177
+msgid "移到工作区"
+msgstr "Move to workspace"
+
+#: src/menu.c:188
+#, c-format
+msgid "工作区 %u"
+msgstr "Workspace %u"
+
+#: src/menu.c:200 src/preview.c:286
+msgid "取消应用静音"
+msgstr "Unmute application"
+
+#: src/menu.c:200 src/preview.c:286
+msgid "应用静音"
+msgstr "Mute application"
+
+#: src/menu.c:205 src/menu.c:254
+msgid "取消固定"
+msgstr "Unpin"
+
+#: src/menu.c:205
+msgid "固定到启动器"
+msgstr "Pin to dock"
+
+#: src/menu.c:208
+msgid "关联到应用…"
+msgstr "Associate with application…"
+
+#: src/menu.c:210
+msgid "清除手动关联"
+msgstr "Clear manual association"
+
+#: src/menu.c:246
+msgid "向左移动"
+msgstr "Move left"
+
+#: src/menu.c:247
+msgid "向上移动"
+msgstr "Move up"
+
+#: src/menu.c:250
+msgid "向右移动"
+msgstr "Move right"
+
+#: src/menu.c:251
+msgid "向下移动"
+msgstr "Move down"
+
+#: src/menu.c:287
+msgid "显示桌面"
+msgstr "Show desktop"
+
+#: src/menu.c:292
+msgid "最小化所有窗口"
+msgstr "Minimize all windows"
+
+#: src/preview.c:313
+msgid "已最小化 · 最后一帧"
+msgstr "Minimized · Last frame"
+
+#: src/preview.c:314
+msgid "点击预览切换窗口"
+msgstr "Click preview to activate window"
+
+#: src/preview.c:318
+msgid "暂无可用画面 · 点击恢复窗口"
+msgstr "No frame available · Click to restore window"
+
+#: src/preview.c:326
+msgid "所有工作区"
+msgstr "All workspaces"
+
+#: src/preview.c:435
+#, c-format
+msgid "应用已静音 · %u%%"
+msgstr "Application muted · %u%%"
+
+#: src/preview.c:435
+#, c-format
+msgid "应用音量 %u%%"
+msgstr "Application volume %u%%"
+
+#: src/associations.c:57
+msgid "窗口缺少可保存的窗口类，或所选桌面文件无效。"
+msgstr ""
+"The window has no reusable class, or the selected desktop file is invalid."
+
+#: src/associations.c:88
+msgid "窗口已关闭，请为仍在运行的窗口设置关联。"
+msgstr ""
+"The window has closed. Set an association for a window that is still running."
+
+#: src/associations.c:104
+msgid "选择关联应用的桌面文件"
+msgstr "Select the application desktop file"
+
+#: src/associations.c:105
+msgid "关联"
+msgstr "Associate"
+
+#: src/associations.c:107
+msgid "应用启动器 (*.desktop)"
+msgstr "Application launchers (*.desktop)"
+
+#: src/associations.c:113
+msgid ""
+"此规则适用于相同窗口类的所有窗口。\n"
+"窗口类完全相同的多配置应用仍需要应用自身提供不同身份。"
+msgstr ""
+"This rule applies to all windows with the same window class.\n"
+"Profiles with identical window classes still need distinct identities from "
+"the application."
+
+#: src/layout.c:46
+#, c-format
+msgid "更多窗口与启动器（%u）"
+msgstr "More windows and launchers (%u)"

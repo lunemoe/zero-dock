@@ -38,11 +38,20 @@ The module is installed under `<libdir>/xfce4/panel/plugins/`, with its registra
 
 Right-click the panel → **Panel → Add New Items → Zero Dock Window Dock**. The Chinese entry is **Zero Dock 窗口停靠**. Restarting the desktop is not required to add a registered plugin. If a newly installed item is absent, open Add New Items again and verify the installation paths.
 
-Open the instance's **Properties** for previews, numbering, workspace filtering and reserved slots. Use the panel's icon-size setting for larger icons. Pin applications through a window's context menu or drop `.desktop` files from a file manager.
+Open the instance's **Properties** for previews, numbering, workspace filtering, reserved slots, the visible-icon limit, click actions and configuration backup/restore. Restoring a configuration automatically saves the current one to a `zero-dock-<ID>.rc.backup-<timestamp>` sibling before replacement. Use the panel's icon-size setting for larger icons. Pin applications through a window's context menu or drop `.desktop` files from a file manager.
 
 ## Upgrade and removal
 
 The currently running external process may retain the previous library after a package upgrade. To replace it safely:
+
+From a source checkout, the maintenance tool can reload an installed instance while keeping its ID, fixed list and panel item order:
+
+```sh
+python tools/reload-instance.py --instance <ID>
+python tools/reload-instance.py --instance <ID> --apply
+```
+
+The first command checks the instance and reports the operation. The second saves the panel, makes a configuration backup under `~/.local/state/zero-dock/backups/`, and sends XFCE's reserved `SIGUSR1` restart signal to that instance's external wrapper. XFCE respawns it with the same ID and configuration. Panel item lists stay unchanged. This behavior is verified against the [XFCE 4.20.8 source](https://gitlab.xfce.org/xfce/xfce4-panel/-/blob/xfce4-panel-4.20.8/panel/panel-plugin-external.c#L744). Install the new package first. The manual alternative is:
 
 1. Copy `~/.config/xfce4/panel/zero-dock-<instance-id>.rc` to a persistent backup outside that directory. Removing the instance removes its configuration.
 2. Upgrade the package, then remove only the old Zero Dock instance using its panel menu.

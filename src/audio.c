@@ -62,12 +62,15 @@ gboolean zd_fuzzy_match(const gchar *a, const gchar *b) {
 }
 gboolean zd_stream_matches(ZdButton *b, const ZdStream *s) {
   if (b->window && s->pid > 0) {
-    pid_t pid = zd_window_pid(b->window);
+    pid_t pid = b->pid > 0 ? b->pid : (b->pid = zd_window_pid(b->window));
     if (zd_pid_descends(s->pid, pid))
       return TRUE;
     for (GList *l = b->dock->buttons; l; l = l->next) {
       ZdButton *q = l->data;
-      if (q->window && zd_pid_descends(s->pid, zd_window_pid(q->window)))
+      if (q->window &&
+          zd_pid_descends(s->pid, q->pid > 0
+                                      ? q->pid
+                                      : (q->pid = zd_window_pid(q->window))))
         return FALSE;
     }
   }
@@ -120,7 +123,7 @@ static void info_cb(pa_context *c, const pa_sink_input_info *i, int end,
       a->streams = a->pending;
       a->pending = NULL;
       g_ptr_array_free(old, TRUE);
-      zd_queue_refresh(a->dock);
+      zd_update_audio_buttons(a->dock);
     } else
       g_clear_pointer(&a->pending, g_ptr_array_unref);
     if (a->again) {
@@ -206,7 +209,7 @@ static void context_state(pa_context *c, void *p) {
     g_ptr_array_set_size(a->streams, 0);
     g_clear_pointer(&a->pending, g_ptr_array_unref);
     a->querying = FALSE;
-    zd_queue_refresh(a->dock);
+    zd_update_audio_buttons(a->dock);
     if (!a->reconnect_id)
       a->reconnect_id = g_timeout_add_seconds(3, reconnect, a);
     break;
@@ -269,7 +272,7 @@ void zd_audio_mute(ZdButton *b) {
       }
     }
   }
-  zd_update_buttons(b->dock);
+  zd_update_audio_buttons(b->dock);
 }
 void zd_audio_volume(ZdButton *b, gint steps) {
   ZdAudio *a = b->dock->audio;
@@ -291,5 +294,5 @@ void zd_audio_volume(ZdButton *b, gint steps) {
       }
     }
   }
-  zd_update_buttons(b->dock);
+  zd_update_audio_buttons(b->dock);
 }

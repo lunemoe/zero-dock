@@ -28,11 +28,12 @@ void zd_minimize(ZdButton *b) {
   xfw_window_set_minimized(b->window, TRUE, NULL);
 }
 void zd_toggle(ZdButton *b) {
-  if (b->pinned) {
-    zd_launch(b);
+  if (!b->window && b->pinned) {
+    if (!b->launching)
+      zd_launch(b);
     return;
   }
-  if (b->window && xfw_window_is_active(b->window))
+  if (b->dock->left_action == 0 && b->window && xfw_window_is_active(b->window))
     zd_minimize(b);
   else
     zd_activate(b);
@@ -42,7 +43,8 @@ void zd_cycle(ZdDock *d, gint delta) {
   gint active = -1;
   for (GList *l = d->buttons; l; l = l->next) {
     ZdButton *b = l->data;
-    if (b->window && gtk_widget_get_visible(b->widget)) {
+    if (b->window && b->eligible &&
+        (d->all_workspaces || zd_window_in_workspace(b->window))) {
       if (xfw_window_is_active(b->window))
         active = a->len;
       g_ptr_array_add(a, b);
@@ -62,19 +64,39 @@ static gboolean draw(GtkWidget *w, cairo_t *cr, ZdButton *b) {
   gboolean active = b->window && xfw_window_is_active(b->window),
            min = b->window && xfw_window_is_minimized(b->window),
            urgent = b->window && xfw_window_is_urgent(b->window);
+  GdkRGBA accent = {.red = .69, .green = .43, .blue = 1, .alpha = 1};
+  gtk_style_context_lookup_color(gtk_widget_get_style_context(w),
+                                 "theme_selected_bg_color", &accent);
   if (active) {
-    cairo_set_source_rgba(cr, .57, .42, .9, .20);
+    cairo_set_source_rgba(cr, accent.red, accent.green, accent.blue, .20);
     cairo_rectangle(cr, 2, 2, width - 4, height - 4);
     cairo_fill(cr);
   }
   if (b->icon) {
-    gdouble x = (width - gdk_pixbuf_get_width(b->icon)) / 2,
-            y = (height - gdk_pixbuf_get_height(b->icon)) / 2;
-    gdk_cairo_set_source_pixbuf(cr, b->icon, x, y);
+    gdouble scale = MAX(1, b->icon_scale),
+            x = (width - gdk_pixbuf_get_width(b->icon) / scale) / 2,
+            y = (height - gdk_pixbuf_get_height(b->icon) / scale) / 2;
+    cairo_save(cr);
+    cairo_translate(cr, x, y);
+    cairo_scale(cr, 1 / scale, 1 / scale);
+    gdk_cairo_set_source_pixbuf(cr, b->icon, 0, 0);
     cairo_paint_with_alpha(cr, min ? .45 : 1);
+    cairo_restore(cr);
+  }
+  if (b->launching) {
+    gdouble angle = (g_get_monotonic_time() % 1000000) / 1000000. * 2 * G_PI;
+    cairo_set_source_rgba(cr, accent.red, accent.green, accent.blue, .9);
+    cairo_set_line_width(cr, 2);
+    cairo_arc(cr, width / 2, height / 2, MIN(width, height) / 2 - 3, angle,
+              angle + G_PI * 1.3);
+    cairo_stroke(cr);
+  } else if (b->launch_error || (b->pinned && !b->app)) {
+    cairo_set_source_rgb(cr, 1, .65, .2);
+    cairo_arc(cr, width - 8, height - 8, 4, 0, 2 * G_PI);
+    cairo_fill(cr);
   }
   if (active) {
-    cairo_set_source_rgb(cr, .69, .43, 1);
+    gdk_cairo_set_source_rgba(cr, &accent);
     if (b->dock->orientation == GTK_ORIENTATION_HORIZONTAL)
       cairo_rectangle(cr, width * .25, height - 3, width * .5, 3);
     else
@@ -123,14 +145,17 @@ static gboolean pressed(GtkWidget *w, GdkEventButton *e, ZdButton *b) {
   (void)w;
   if (e->button == 3) {
     zd_preview_hide(b->dock);
-    if (b->pinned)
-      zd_pin_menu(b, (GdkEvent *)e);
-    else
+    if (b->window)
       zd_window_menu(b, (GdkEvent *)e);
+    else
+      zd_pin_menu(b, (GdkEvent *)e);
     return TRUE;
   }
   if (e->button == 2) {
-    zd_launch(b);
+    if (b->dock->middle_action == 0)
+      zd_launch(b);
+    else if (b->dock->middle_action == 1)
+      zd_close_window(b);
     return TRUE;
   }
   return FALSE;
@@ -139,6 +164,31 @@ static void clicked(GtkButton *w, ZdButton *b) {
   (void)w;
   if (!b->dock->dragging)
     zd_toggle(b);
+}
+void zd_close_window(ZdButton *b) {
+  if (!b->window || b->closed)
+    return;
+  XfwWindow *window = g_object_ref(b->window);
+  guint32 time = zd_timestamp(b->dock);
+  zd_preview_hide(b->dock);
+  xfw_window_close(window, time, NULL);
+  g_object_unref(window);
+}
+static gboolean key_press(GtkWidget *widget, GdkEventKey *event, ZdButton *b) {
+  if (event->keyval == GDK_KEY_Menu ||
+      (event->keyval == GDK_KEY_F10 && (event->state & GDK_SHIFT_MASK))) {
+    if (b->window)
+      zd_window_menu(b, (GdkEvent *)event);
+    else
+      zd_pin_menu(b, (GdkEvent *)event);
+    return TRUE;
+  }
+  if ((event->keyval == GDK_KEY_Return || event->keyval == GDK_KEY_KP_Enter) &&
+      (event->state & GDK_CONTROL_MASK)) {
+    zd_launch(b);
+    return TRUE;
+  }
+  return zd_focus_key(widget, event, b->dock);
 }
 static gint scroll_steps(GdkEventScroll *e, gdouble *accumulator) {
   if (e->direction == GDK_SCROLL_UP || e->direction == GDK_SCROLL_LEFT) {
@@ -183,6 +233,8 @@ static gboolean scroll(GtkWidget *w, GdkEventScroll *e, ZdButton *b) {
     zd_audio_scroll(b, e);
     return TRUE;
   }
+  if (!b->dock->scroll_windows)
+    return FALSE;
   gint steps = scroll_steps(e, &b->window_scroll);
   if (steps) {
     zd_cycle(b->dock, -steps);
@@ -326,6 +378,7 @@ static void box_received(GtkWidget *w, GdkDragContext *c, gint x, gint y,
 static ZdButton *create(ZdDock *d) {
   ZdButton *b = g_new0(ZdButton, 1);
   b->dock = d;
+  b->icon_dirty = TRUE;
   b->widget = gtk_overlay_new();
   b->main = gtk_button_new();
   b->drawing = gtk_drawing_area_new();
@@ -352,6 +405,8 @@ static ZdButton *create(ZdDock *d) {
   gtk_widget_add_events(b->widget, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK);
   g_signal_connect(b->drawing, "draw", G_CALLBACK(draw), b);
   g_signal_connect(b->main, "button-press-event", G_CALLBACK(pressed), b);
+  gtk_widget_set_can_focus(b->main, TRUE);
+  g_signal_connect(b->main, "key-press-event", G_CALLBACK(key_press), b);
   g_signal_connect(b->main, "clicked", G_CALLBACK(clicked), b);
   g_signal_connect(b->main, "scroll-event", G_CALLBACK(scroll), b);
   g_signal_connect(b->widget, "scroll-event", G_CALLBACK(scroll), b);
@@ -378,36 +433,104 @@ static ZdButton *create(ZdDock *d) {
   }
   gtk_box_pack_start(GTK_BOX(d->box), b->widget, FALSE, FALSE, 0);
   gtk_widget_show_all(b->widget);
+  gtk_widget_set_no_show_all(b->widget, TRUE);
   d->buttons = g_list_append(d->buttons, b);
   return b;
 }
 ZdButton *zd_add_pin(ZdDock *d, const gchar *path) {
-  GDesktopAppInfo *a = g_desktop_app_info_new_from_filename(path);
-  if (!a)
+  if (!path || !g_path_is_absolute(path) || !g_str_has_suffix(path, ".desktop"))
     return NULL;
+  GDesktopAppInfo *a = g_desktop_app_info_new_from_filename(path);
+  for (GList *l = d->buttons; l; l = l->next) {
+    ZdButton *b = l->data;
+    if (b->pinned && !g_strcmp0(b->desktop, path)) {
+      g_clear_object(&a);
+      return b;
+    }
+  }
   ZdButton *b = create(d);
   b->pinned = TRUE;
   b->app = a;
   b->desktop = g_strdup(path);
   b->key = g_strconcat("pin:", path, NULL);
+  d->app_generation++;
   return b;
 }
 ZdButton *zd_add_window(ZdDock *d, XfwWindow *w) {
-  ZdButton *b = create(d);
-  b->window = g_object_ref(w);
-  b->app = zd_match_app(d, w);
-  b->key = g_strdup_printf("window:%lu", xfw_window_x11_get_xid(w));
-  g_hash_table_insert(d->windows, w, b);
-  const gchar *signals[] = {"state-changed", "name-changed",
-                            "icon-changed",  "workspace-changed",
-                            "class-changed", "capabilities-changed"};
-  for (guint i = 0; i < G_N_ELEMENTS(signals); i++)
-    g_signal_connect_swapped(w, signals[i], G_CALLBACK(zd_queue_refresh), d);
+  GDesktopAppInfo *app = zd_match_app(d, w);
+  ZdButton *b = NULL;
+  for (GList *l = d->buttons; l; l = l->next) {
+    ZdButton *pin = l->data;
+    if (pin->pinned && !pin->window && zd_app_equal(pin->app, app)) {
+      b = pin;
+      break;
+    }
+  }
+  if (!b) {
+    b = create(d);
+    b->app = app;
+    app = NULL;
+    b->key = g_strdup_printf("window:%lu", xfw_window_x11_get_xid(w));
+  }
+  g_clear_object(&app);
+  zd_button_attach_window(b, w);
+  for (GList *l = d->buttons; l; l = l->next) {
+    ZdButton *q = l->data;
+    if (q->launching && zd_app_equal(q->app, b->app))
+      zd_launch_complete(q);
+  }
   return b;
 }
-void zd_button_free(ZdButton *b) {
+static void class_changed(ZdButton *b) {
+  b->match_dirty = TRUE;
+  b->pid = 0;
+  b->thumbnail_time = 0;
+  zd_queue_refresh(b->dock);
+}
+static void icon_changed(ZdButton *b) {
+  b->icon_dirty = TRUE;
+  zd_queue_refresh(b->dock);
+}
+static GdkFilterReturn identity_event(GdkXEvent *event, GdkEvent *gdk_event,
+                                      gpointer data) {
+  (void)gdk_event;
+  XEvent *xevent = event;
+  ZdButton *b = data;
+  if (xevent->type == PropertyNotify)
+    for (guint i = 0; i < G_N_ELEMENTS(b->dock->identity_atoms); i++)
+      if (xevent->xproperty.atom == b->dock->identity_atoms[i]) {
+        class_changed(b);
+        break;
+      }
+  return GDK_FILTER_CONTINUE;
+}
+void zd_button_attach_window(ZdButton *b, XfwWindow *w) {
   ZdDock *d = b->dock;
-  b->closed = TRUE;
+  b->window = g_object_ref(w);
+  b->pid = zd_window_pid(w);
+  b->icon_dirty = TRUE;
+  b->match_dirty = FALSE;
+  b->match_generation = d->app_generation;
+  g_hash_table_insert(d->windows, w, b);
+  const gchar *signals[] = {"state-changed", "name-changed",
+                            "workspace-changed", "capabilities-changed"};
+  for (guint i = 0; i < G_N_ELEMENTS(signals); i++)
+    g_signal_connect_swapped(w, signals[i], G_CALLBACK(zd_queue_refresh), d);
+  g_signal_connect_swapped(w, "class-changed", G_CALLBACK(class_changed), b);
+  g_signal_connect_swapped(w, "icon-changed", G_CALLBACK(icon_changed), b);
+  GdkDisplay *gd = gdk_display_get_default();
+  gdk_x11_display_error_trap_push(gd);
+  b->xwindow =
+      gdk_x11_window_foreign_new_for_display(gd, xfw_window_x11_get_xid(w));
+  if (b->xwindow) {
+    gdk_window_set_events(b->xwindow, gdk_window_get_events(b->xwindow) |
+                                          GDK_PROPERTY_CHANGE_MASK);
+    gdk_window_add_filter(b->xwindow, identity_event, b);
+  }
+  gdk_x11_display_error_trap_pop_ignored(gd);
+}
+void zd_button_release_window(ZdButton *b) {
+  ZdDock *d = b->dock;
   if (d->hover_button == b)
     zd_preview_hide(d);
   if (d->drag_button == b) {
@@ -418,63 +541,117 @@ void zd_button_free(ZdButton *b) {
     d->insert_button = NULL;
   if (d->menu)
     gtk_widget_destroy(d->menu);
-  if (b->window)
+  if (b->xwindow) {
+    gdk_window_remove_filter(b->xwindow, identity_event, b);
+    g_clear_object(&b->xwindow);
+  }
+  if (b->window) {
+    g_hash_table_remove(d->windows, b->window);
     g_signal_handlers_disconnect_by_data(b->window, d);
+    g_signal_handlers_disconnect_by_data(b->window, b);
+    g_clear_object(&b->window);
+  }
+  g_clear_object(&b->thumbnail);
+  b->audio = (ZdAudioStatus){0};
+  b->number = 0;
+  b->audio_scroll = b->window_scroll = 0;
+  b->last_audio_time = 0;
+  b->pid = 0;
+  b->icon_dirty = TRUE;
+}
+void zd_button_free(ZdButton *b) {
+  b->closed = TRUE;
+  zd_button_release_window(b);
   gtk_widget_destroy(b->widget);
-  g_clear_object(&b->window);
   g_clear_object(&b->app);
   g_clear_object(&b->icon);
-  g_clear_object(&b->thumbnail);
   g_free(b->desktop);
   g_free(b->key);
+  g_free(b->startup_id);
+  g_free(b->launch_error);
   g_free(b);
 }
 static gboolean same_app(ZdButton *a, ZdButton *b) {
   if (a->app && b->app)
-    return g_app_info_equal(G_APP_INFO(a->app), G_APP_INFO(b->app));
+    return zd_app_equal(a->app, b->app);
   const gchar *const *aa = xfw_window_get_class_ids(a->window),
                      *const *bb = xfw_window_get_class_ids(b->window);
   return aa && bb && aa[0] && bb[0] && !g_ascii_strcasecmp(aa[0], bb[0]);
 }
-void zd_update_buttons(ZdDock *d) {
-  gtk_widget_set_size_request(d->box,
-                              d->orientation == GTK_ORIENTATION_HORIZONTAL
-                                  ? MAX(12, d->slots * (d->unit + 2))
-                                  : 12,
-                              d->orientation == GTK_ORIENTATION_VERTICAL
-                                  ? MAX(12, d->slots * (d->unit + 2))
-                                  : 12);
+gboolean zd_window_in_workspace(XfwWindow *w) {
+  if (xfw_window_is_pinned(w))
+    return TRUE;
+  XfwWorkspace *ws = xfw_window_get_workspace(w);
+  return !ws || (xfw_workspace_get_state(ws) & XFW_WORKSPACE_STATE_ACTIVE);
+}
+void zd_update_audio_buttons(ZdDock *d) {
+  if (d->disposing)
+    return;
   for (GList *l = d->buttons; l; l = l->next) {
     ZdButton *b = l->data;
-    g_clear_object(&b->icon);
-    if (b->window) {
-      GdkPixbuf *p = xfw_window_get_icon(b->window, d->icon_size,
-                                         gtk_widget_get_scale_factor(d->box));
-      if (p)
-        b->icon = gdk_pixbuf_scale_simple(p, d->icon_size, d->icon_size,
-                                          GDK_INTERP_BILINEAR);
+    ZdAudioStatus old = b->audio;
+    b->audio = zd_audio_status(b);
+    gtk_widget_set_visible(b->sound, b->audio.present &&
+                                         (b->audio.playing || b->audio.muted));
+    if (!gtk_button_get_image(GTK_BUTTON(b->sound)) ||
+        old.muted != b->audio.muted) {
+      GtkWidget *image = gtk_image_new_from_icon_name(
+          b->audio.muted ? "audio-volume-muted-symbolic"
+                         : "audio-volume-high-symbolic",
+          GTK_ICON_SIZE_MENU);
+      gtk_button_set_image(GTK_BUTTON(b->sound), image);
+      gtk_widget_show(image);
+      gtk_widget_set_tooltip_text(b->sound, b->audio.muted
+                                                ? _("取消应用静音 · 滚轮调音量")
+                                                : _("应用静音 · 滚轮调音量"));
     }
-    if (!b->icon && b->app) {
-      GIcon *i = g_app_info_get_icon(G_APP_INFO(b->app));
-      GtkIconInfo *info = i ? gtk_icon_theme_lookup_by_gicon(
-                                  gtk_icon_theme_get_default(), i, d->icon_size,
-                                  GTK_ICON_LOOKUP_FORCE_SIZE)
-                            : NULL;
-      if (info) {
-        b->icon = gtk_icon_info_load_icon(info, NULL);
-        g_object_unref(info);
+  }
+  zd_preview_update_audio(d);
+}
+void zd_update_buttons(ZdDock *d) {
+  zd_layout_update(d);
+  for (GList *l = d->buttons; l; l = l->next) {
+    ZdButton *b = l->data;
+    guint scale = gtk_widget_get_scale_factor(d->box),
+          pixels = d->icon_size * scale;
+    if (b->icon_dirty || b->icon_pixels != pixels || b->icon_scale != scale) {
+      g_clear_object(&b->icon);
+      b->icon_dirty = FALSE;
+      b->icon_pixels = pixels;
+      b->icon_scale = scale;
+      if (b->window) {
+        GdkPixbuf *p = xfw_window_get_icon(b->window, d->icon_size,
+                                           gtk_widget_get_scale_factor(d->box));
+        if (p)
+          b->icon =
+              gdk_pixbuf_scale_simple(p, pixels, pixels, GDK_INTERP_BILINEAR);
       }
+      if (!b->icon && b->app) {
+        GIcon *i = g_app_info_get_icon(G_APP_INFO(b->app));
+        GtkIconInfo *info = i ? gtk_icon_theme_lookup_by_gicon_for_scale(
+                                    d->icon_theme, i, d->icon_size, scale,
+                                    GTK_ICON_LOOKUP_FORCE_SIZE)
+                              : NULL;
+        if (info) {
+          b->icon = gtk_icon_info_load_icon(info, NULL);
+          g_object_unref(info);
+        }
+      }
+      if (!b->icon)
+        b->icon = gtk_icon_theme_load_icon_for_scale(
+            d->icon_theme,
+            b->pinned && !b->app ? "dialog-warning"
+                                 : "application-x-executable",
+            d->icon_size, scale, GTK_ICON_LOOKUP_FORCE_SIZE, NULL);
     }
-    if (!b->icon)
-      b->icon = gtk_icon_theme_load_icon(
-          gtk_icon_theme_get_default(), "application-x-executable",
-          d->icon_size, GTK_ICON_LOOKUP_FORCE_SIZE, NULL);
     b->number = 0;
     if (b->window) {
       guint n = 0, order = 0;
       for (GList *k = d->buttons; k; k = k->next) {
         ZdButton *q = k->data;
-        if (q->window && same_app(b, q)) {
+        if (q->window && same_app(b, q) &&
+            (d->all_workspaces || q->pinned ||
+             zd_window_in_workspace(q->window))) {
           n++;
           if (q == b)
             order = n;
@@ -483,33 +660,17 @@ void zd_update_buttons(ZdDock *d) {
       if (n > 1)
         b->number = order;
     }
-    gboolean visible = TRUE;
-    if (b->window && !d->all_workspaces && !xfw_window_is_pinned(b->window)) {
-      XfwWorkspace *ws = xfw_window_get_workspace(b->window);
-      visible =
-          !ws || (xfw_workspace_get_state(ws) & XFW_WORKSPACE_STATE_ACTIVE);
-    }
-    gtk_widget_set_visible(b->widget, visible);
     gtk_widget_set_size_request(b->main, d->unit, d->unit);
     gtk_widget_set_size_request(b->drawing, d->unit, d->unit);
-    const gchar *title = b->window
-                             ? xfw_window_get_name(b->window)
-                             : g_app_info_get_display_name(G_APP_INFO(b->app));
-    gtk_widget_set_tooltip_text(b->main,
-                                d->previews && b->window ? NULL : title);
+    const gchar *title = b->window ? xfw_window_get_name(b->window)
+                         : b->app
+                             ? g_app_info_get_display_name(G_APP_INFO(b->app))
+                             : _("启动器文件已失效");
+    gtk_widget_set_tooltip_text(b->main, b->launching      ? _("正在启动…")
+                                         : b->launch_error ? b->launch_error
+                                         : d->previews && b->window ? NULL
+                                                                    : title);
     atk_object_set_name(gtk_widget_get_accessible(b->main), title);
-    b->audio = zd_audio_status(b);
-    gtk_widget_set_visible(b->sound, b->audio.present &&
-                                         (b->audio.playing || b->audio.muted));
-    GtkWidget *image = gtk_image_new_from_icon_name(
-        b->audio.muted ? "audio-volume-muted-symbolic"
-                       : "audio-volume-high-symbolic",
-        GTK_ICON_SIZE_MENU);
-    gtk_button_set_image(GTK_BUTTON(b->sound), image);
-    gtk_widget_show(image);
-    gtk_widget_set_tooltip_text(b->sound, b->audio.muted
-                                              ? "取消应用静音 · 滚轮调音量"
-                                              : "应用静音 · 滚轮调音量");
     gtk_widget_queue_draw(b->drawing);
     if (b->window && gtk_widget_get_realized(b->main)) {
       GtkAllocation a;
@@ -519,5 +680,5 @@ void zd_update_buttons(ZdDock *d) {
                                      &r, NULL);
     }
   }
-  zd_preview_update_audio(d);
+  zd_update_audio_buttons(d);
 }
