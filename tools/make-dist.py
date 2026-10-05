@@ -20,14 +20,14 @@ def main():
     added = subprocess.check_output(
         ['git', 'ls-files', '--others', '--exclude-standard', '-z'], cwd=ROOT
     ).decode().split('\0')
-    allowed_roots = {'src', 'data', 'docs', 'tests', 'tools', 'po'}
-    allowed_extensions = {'.c', '.h', '.py', '.md', '.po', '.pot', '.in', '.desktop'}
+    allowed_roots = {'rust', 'data', 'docs', 'tests', 'tools', 'po'}
+    allowed_extensions = {'.rs', '.toml', '.lock', '.py', '.md', '.po', '.pot', '.in', '.desktop'}
     new_sources = [p for p in added if p and Path(p).parts[0] in allowed_roots
                    and (Path(p).suffix in allowed_extensions
                         or Path(p).name in {'meson.build', 'LINGUAS'})]
     paths = sorted(p for p in set(tracked + new_sources)
-                   if p and not p.startswith('packaging/'))
-    if 'src/input.c' not in paths or 'LICENSE' not in paths or 'meson_options.txt' not in paths:
+                   if p and not p.startswith('packaging/') and (ROOT / p).is_file())
+    if 'rust/src/audio.rs' not in paths or 'LICENSE' not in paths or 'meson_options.txt' not in paths:
         raise SystemExit('Source tree is incomplete')
     output = ROOT / 'dist' / f'zero-dock-{version}.tar.gz'
     output.parent.mkdir(exist_ok=True)

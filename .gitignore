@@ -10,3 +10,5 @@ __pycache__/
 *.py[cod]
 *.core
 core
+
+/rust/target/

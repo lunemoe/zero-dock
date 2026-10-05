@@ -9,13 +9,13 @@ Use the dependencies and commands in [README.md](README.md#development). All che
 Before submitting behavior changes:
 
 ```sh
-clang-format --dry-run --Werror src/*.c src/*.h tests/*.c
+cargo fmt --manifest-path rust/Cargo.toml --check
 meson compile -C build-dev
 meson test -C build-dev --print-errorlogs
 python tests/run-isolated.py build-dev
 ```
 
-Use `.clang-format` for C, four-space indentation for Python, and meaningful regression tests for changed behavior. Documentation-only changes do not require desktop integration tests. [Testing](docs/TESTING.md) explains sanitizer coverage and limitations.
+Use `cargo fmt` for Rust, four-space indentation for Python, and meaningful regression tests for changed behavior. Documentation-only changes do not require desktop integration tests. [Testing](docs/TESTING.md) explains sanitizer coverage and limitations.
 
 ## Desktop safety
 

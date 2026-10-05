@@ -4,7 +4,7 @@
 
 本项目所有检查在本机执行，不使用 GitHub CI 或 Actions。
 
-C / GTK3 编写的 XFCE 原生面板插件，使用 libxfce4windowing 管理窗口，libpulse 控制 PipeWire-Pulse 应用音频，XComposite 获取窗口缩略图。
+纯 Rust 编写的 XFCE 原生面板插件（cdylib 直接导出 XFCE 模块入口，零 C 代码），使用 libxfce4windowing 管理窗口，libpulse 控制 PipeWire-Pulse 应用音频，XComposite 获取窗口缩略图。
 
 ## 使用
 

@@ -1,8 +1,8 @@
-src/plugin.c
-src/apps.c
-src/settings.c
-src/buttons.c
-src/menu.c
-src/preview.c
-src/associations.c
-src/layout.c
+rust/src/apps.rs
+rust/src/associations.rs
+rust/src/layout.rs
+rust/src/menu.rs
+rust/src/preview.rs
+rust/src/settings.rs
+rust/src/button.rs
+rust/src/dock.rs

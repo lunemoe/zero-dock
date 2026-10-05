@@ -1,6 +1,6 @@
 # Zero Dock
 
-A native XFCE panel dock for X11, written in C and GTK 3. Each window gets its own icon: windows are never grouped.
+A native XFCE panel dock for X11, written entirely in Rust (the cdylib exports the XFCE module entry point directly). Each window gets its own icon: windows are never grouped.
 
 [简体中文](README.zh-CN.md) · [Installation](docs/INSTALL.md) · [Contributing](CONTRIBUTING.md) · [Testing](docs/TESTING.md)
 
@@ -30,14 +30,14 @@ The screenshot uses a synthetic test window. This is an early release; compatibi
 
 Linux, XFCE panel 4.20+, libxfce4windowing 4.20+, libxfce4ui 4.18+, GTK 3.24+, X11, and a PulseAudio-compatible audio server. Live previews require an X11 compositor. Wayland is not supported.
 
-Build dependencies: a C11 compiler, Meson 0.63+, Ninja, gettext, pkg-config, GLib/GIO, libpulse, libX11, libXcomposite and libXi. Tests additionally require libXtst, Xvfb, xfwm4, D-Bus, Python 3 and `pacat`.
+Build dependencies: Rust 1.75+ (cargo), Meson 0.63+, Ninja, gettext, pkg-config, GLib/GIO, libpulse, libX11, libXcomposite and libXi. Tests additionally require libXtst, Xvfb, xfwm4, D-Bus, Python 3 and `pacat`.
 
 ## Build and install
 
 On Arch Linux / CachyOS:
 
 ```sh
-sudo pacman -S --needed base-devel meson ninja gettext xfce4-panel libxfce4ui   libxfce4windowing gtk3 glib2 libpulse libx11 libxcomposite libxi
+sudo pacman -S --needed rust meson ninja gettext xfce4-panel libxfce4ui   libxfce4windowing gtk3 glib2 libpulse libx11 libxcomposite libxi
 meson setup build --prefix=/usr --libdir=lib -Dtests=false
 meson compile -C build
 sudo meson install -C build

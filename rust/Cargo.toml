@@ -1,0 +1,43 @@
+[package]
+name = "zero-dock"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "Zero Dock XFCE panel plugin core (Rust)"
+
+[features]
+default = []
+test-harness = ["x11/xtest"]
+
+[lib]
+name = "zero_dock"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+gtk = "0.18"
+glib = { version = "0.18", features = ["v2_66"] }
+gio = { version = "0.18", features = ["v2_66"] }
+gdk = "0.18"
+gdk-pixbuf = "0.18"
+cairo-rs = "0.18"
+cairo = { package = "cairo-rs", version = "0.18" }
+pango = "0.18"
+libpulse-binding = { version = "2.30", features = ["pa_v15"] }
+libpulse-glib-binding = { version = "2.29", default-features = false, features = ["pa_v15"] }
+x11 = { version = "2.21", features = ["xlib", "xinput"] }
+
+libc = "0.2"
+
+[[bin]]
+name = "zero-dock-test-host"
+path = "src/bin/test_host.rs"
+
+[[bin]]
+name = "zero-dock-integration"
+path = "src/bin/integration.rs"
+required-features = ["test-harness"]
+
+[build-dependencies]
+pkg-config = "0.3"
+
+[dev-dependencies]
