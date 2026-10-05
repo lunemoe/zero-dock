@@ -35,12 +35,10 @@ const PA_VOLUME_NORM: u32 = 65536;
 type InfoOp = pa::operation::Operation<dyn FnMut(ListResult<&SinkInputInfo>)>;
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)] // `name` mirrors the C data model; unused for now
 pub struct Stream {
     pub index: u32,
     pub pid: i32,
     pub binary: Option<String>,
-    pub name: Option<String>,
     pub mute: bool,
     pub corked: bool,
     pub volume: ChannelVolumes,
@@ -305,12 +303,10 @@ fn info_callback(weak: &AudioWeak, generation: u64, result: ListResult<&SinkInpu
                 .and_then(|s| s.parse::<i32>().ok())
                 .filter(|p| *p > 0);
             let binary = info.proplist.get_str("application.process.binary");
-            let name = info.proplist.get_str("application.name");
             this.pending.as_mut().unwrap().push(Stream {
                 index: info.index,
                 pid: pid.unwrap_or(0),
                 binary,
-                name,
                 mute: info.mute,
                 corked: info.corked,
                 volume: info.volume,

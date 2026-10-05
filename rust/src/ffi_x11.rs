@@ -6,8 +6,6 @@
 //! raise an asynchronous X error goes through a GDK error trap, exactly like
 //! the C implementation did.
 
-#![allow(dead_code)]
-
 use gdk::ffi as gdk_ffi;
 use std::os::raw::{c_int, c_ulong, c_void};
 use x11::xlib;
@@ -72,10 +70,6 @@ fn display_ptr_unchecked() -> *mut gdk_ffi::GdkDisplay {
     // gdk_ffi::gdk_display_get_default() is safe to call once GTK is
     // initialized; the Rust pointer type mismatch is handled here once.
     unsafe { gdk_ffi::gdk_display_get_default() }
-}
-
-pub fn root_window() -> Window {
-    unsafe { x11::xlib::XDefaultRootWindow(xdisplay()) }
 }
 
 /// The default root GDK window (for server time queries).

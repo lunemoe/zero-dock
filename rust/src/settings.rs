@@ -2,11 +2,9 @@
 //! import/export. Ported from `src/settings.c`.
 
 use crate::dock::Dock;
-use crate::util::{real_time_us, t, Timer};
+use crate::util::{real_time_us, t};
 use glib::KeyFile;
 use gtk::prelude::*;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// Typed dock preferences, stored in the `Dock` group of the rc file.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -846,6 +844,3 @@ impl BoolField {
         }
     }
 }
-
-#[allow(dead_code)]
-fn _assert_types(_: &RefCell<()>, _: &Timer, _: &Rc<()>) {}

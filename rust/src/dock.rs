@@ -20,7 +20,7 @@ use gio::prelude::*;
 use gtk::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 pub struct Dock {
     pub plugin: Option<XfcePanelPlugin>,
@@ -70,8 +70,6 @@ pub struct Dock {
     pub dragging: bool,
     pub save_blocked: bool,
     pub autohide_blocked: bool,
-    #[allow(dead_code)] // mirrors the C one-shot dest setup flag
-    pub box_drop_ready: bool,
 
     // Timers
     pub hover_id: Timer,
@@ -649,7 +647,6 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
             dragging: false,
             save_blocked: false,
             autohide_blocked: false,
-            box_drop_ready: false,
             hover_id: Timer::default(),
             refresh_id: Timer::default(),
             active_frame_id: Timer::default(),
@@ -1023,6 +1020,3 @@ fn with_dock_ref<T>(rc: &DockRef, f: impl FnOnce(&mut Dock) -> T) -> Option<T> {
 }
 
 pub type DockRef = Rc<RefCell<Dock>>;
-
-#[allow(dead_code)]
-fn _unused(_: &Weak<()>) {}

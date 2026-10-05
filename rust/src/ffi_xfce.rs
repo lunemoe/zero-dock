@@ -8,12 +8,10 @@
 //! keeps every window/workspace handle memory-safe without writing a custom
 //! ref-count wrapper.
 
-#![allow(dead_code)]
-
 use glib::ffi::gboolean;
 use glib::gobject_ffi::GObject;
 use glib::translate::*;
-use std::os::raw::{c_char, c_int, c_ulong, c_void};
+use std::os::raw::{c_char, c_int, c_ulong};
 
 // ---------------------------------------------------------------------------
 // XfcePanelPlugin
@@ -55,7 +53,6 @@ extern "C" {
     pub fn xfce_panel_plugin_save_location(plugin: *mut GObject, create: gboolean) -> *mut c_char;
     pub fn xfce_panel_plugin_get_arguments(plugin: *mut GObject) -> *mut *mut c_char;
     pub fn xfce_panel_plugin_block_autohide(plugin: *mut GObject, blocked: gboolean);
-    pub fn xfce_panel_plugin_register_menu(plugin: *mut GObject, menu: *mut gtk::ffi::GtkMenu);
     pub fn xfce_panel_plugin_popup_menu(
         plugin: *mut GObject,
         menu: *mut gtk::ffi::GtkMenu,
@@ -132,9 +129,6 @@ impl XfcePanelPlugin {
     pub fn block_autohide(&self, blocked: bool) {
         unsafe { xfce_panel_plugin_block_autohide(self.ptr(), blocked.into_glib()) }
     }
-    pub fn register_menu(&self, menu: &impl glib::IsA<gtk::Menu>) {
-        unsafe { xfce_panel_plugin_register_menu(self.ptr(), menu.as_ref().to_glib_none().0) }
-    }
     pub fn popup_menu(
         &self,
         menu: &impl glib::IsA<gtk::Menu>,
@@ -161,7 +155,6 @@ impl XfcePanelPlugin {
 // ---------------------------------------------------------------------------
 
 pub type XfwWindowType = c_int;
-pub const XFW_WINDOW_TYPE_NORMAL: XfwWindowType = 0;
 pub const XFW_WINDOW_TYPE_DESKTOP: XfwWindowType = 1;
 pub const XFW_WINDOW_TYPE_DOCK: XfwWindowType = 2;
 
@@ -274,52 +267,6 @@ extern "C" {
 // ---------------------------------------------------------------------------
 // Safe wrappers
 // ---------------------------------------------------------------------------
-
-/// Owned handle to an `Xfw*` GObject (window, screen, workspace, ...).
-#[derive(Clone, Debug)]
-pub struct XfwObject(pub glib::Object);
-
-impl XfwObject {
-    pub fn ptr(&self) -> *mut GObject {
-        let p: *mut glib::gobject_ffi::GObject =
-            glib::translate::ToGlibPtr::to_glib_none(&self.0).0;
-        p
-    }
-
-    pub fn id(&self) -> usize {
-        self.ptr() as usize
-    }
-}
-
-impl std::hash::Hash for XfwObject {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.ptr().hash(state);
-    }
-}
-
-impl PartialEq for XfwObject {
-    fn eq(&self, other: &Self) -> bool {
-        self.ptr() == other.ptr()
-    }
-}
-
-impl Eq for XfwObject {}
-
-/// Borrowed (transfer-none) wrapper: does not own a reference.
-pub struct BorrowedXfw(glib::Object);
-
-impl BorrowedXfw {
-    pub fn object(&self) -> glib::Object {
-        self.0.clone()
-    }
-}
-
-impl std::ops::Deref for BorrowedXfw {
-    type Target = glib::Object;
-    fn deref(&self) -> &glib::Object {
-        &self.0
-    }
-}
 
 pub unsafe fn xfw_window(ptr: XfwWindowPtr) -> glib::Object {
     // Transfer-none getters: take our own reference.
@@ -612,6 +559,3 @@ unsafe fn report_error(operation: &str, err: *mut glib::ffi::GError) {
     glib::g_warning!("zero-dock", "Zero Dock {operation}: {message}");
     glib::ffi::g_error_free(err);
 }
-
-#[allow(dead_code)]
-fn _unused(_: *mut c_void) {}

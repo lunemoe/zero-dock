@@ -14,7 +14,6 @@ use std::time::Duration;
 /// core runs, so only the lookup is needed here.
 pub const GETTEXT_DOMAIN: &str = "zero-dock";
 
-#[allow(non_snake_case)]
 pub fn t(s: &str) -> glib::GString {
     glib::dgettext(Some(GETTEXT_DOMAIN), s)
 }
