@@ -296,6 +296,7 @@ impl Dock {
         // Running pinned buttons become ordinary live buttons temporarily.
         let mut i = 0;
         while i < self.buttons.len() {
+            self.buttons[i].thumbnail = None;
             let b = &self.buttons[i];
             if b.pinned {
                 if let Some(window) = b.window.clone() {
@@ -432,7 +433,8 @@ impl IntField {
 
 impl Dock {
     pub fn configure(&mut self) {
-        if self.settings_dialog.is_some() {
+        if let Some(dialog) = self.settings_dialog.as_ref() {
+            dialog.present();
             return;
         }
         let dialog = gtk::Dialog::with_buttons(
@@ -664,15 +666,10 @@ impl Dock {
 
     fn monitor_area(&self) -> gdk::Rectangle {
         let display = gdk::Display::default().unwrap();
-        // The plugin object is a GtkWidget but gtk-rs 0.18 does not type it;
-        // borrow it through the raw pointer instead.
-        let plugin_widget: Option<gtk::Widget> = self.plugin.as_ref().map(|p| unsafe {
-            let borrowed: glib::translate::Borrowed<gtk::Widget> =
-                glib::translate::FromGlibPtrBorrow::from_glib_borrow(
-                    p.0 as *mut gtk::ffi::GtkWidget,
-                );
-            borrowed.into_inner()
-        });
+        let plugin_widget: Option<gtk::Widget> = self
+            .plugin
+            .as_ref()
+            .and_then(|p| p.as_object().downcast::<gtk::Widget>().ok());
         let monitor = plugin_widget.and_then(|w| {
             if !w.is_realized() {
                 return None;

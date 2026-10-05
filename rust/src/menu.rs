@@ -94,7 +94,7 @@ impl Dock {
         }
     }
 
-    fn new_menu(&mut self) -> gtk::Menu {
+    pub(crate) fn new_menu(&mut self) -> gtk::Menu {
         if let Some(old) = self.menu.take() {
             unsafe {
                 old.destroy();

@@ -452,7 +452,7 @@ impl Dock {
         self.apps.clear();
         self.associations.clear();
         self.app_monitor = None;
-        self.icon_theme = gtk::IconTheme::new();
+        self.icon_theme = gtk::IconTheme::default().unwrap_or_default();
         self.screen = None;
         self.window_index.clear();
         self.rc_path = None;
@@ -629,7 +629,10 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
             apps: gio::AppInfo::all(),
             associations: HashMap::new(),
             app_monitor: None,
-            icon_theme: gtk::IconTheme::new(),
+            // The screen default theme follows the user's GtkSettings choice;
+            // a standalone IconTheme::new() has no screen and would only
+            // resolve the Adwaita/gnome/hicolor fallbacks.
+            icon_theme: gtk::IconTheme::default().unwrap_or_default(),
             css: css.clone(),
             screen_handlers: Vec::new(),
             workspace_handlers: Vec::new(),

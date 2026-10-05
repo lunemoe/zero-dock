@@ -1059,6 +1059,46 @@ fn scenario_improvements() -> TestResult {
     );
 
     let host = Host::new(&rc);
+    {
+        let d = host.dock.borrow();
+        // The dock must use the screen default theme so lookups follow the
+        // user's icon theme instead of the Adwaita/hicolor fallbacks.
+        let dock_theme: *mut glib::gobject_ffi::GObject =
+            glib::translate::ToGlibPtr::to_glib_none(&d.icon_theme.clone().upcast::<glib::Object>())
+                .0;
+        let default_theme = gtk::IconTheme::default().expect("default icon theme");
+        let screen_theme: *mut glib::gobject_ffi::GObject =
+            glib::translate::ToGlibPtr::to_glib_none(&default_theme.clone().upcast::<glib::Object>())
+                .0;
+        check!(
+            dock_theme == screen_theme,
+            "dock must use the screen default icon theme"
+        );
+    }
+    {
+        // Opening the preferences dialog borrows the plugin widget to place
+        // it; that must not steal a reference to the plugin object itself.
+        let plugin = host.raw_plugin;
+        let before = unsafe { (*plugin).ref_count };
+        {
+            let mut d = host.dock.borrow_mut();
+            d.configure();
+            check!(d.settings_dialog.is_some(), "settings dialog must open");
+        }
+        let after_open = unsafe { (*plugin).ref_count };
+        check!(
+            after_open == before,
+            "configure() must not change the plugin refcount"
+        );
+        let dialog = host
+            .dock
+            .borrow_mut()
+            .settings_dialog
+            .take()
+            .expect("settings dialog still open");
+        unsafe { dialog.destroy() };
+    }
+    pump(100);
     let mut pin = host
         .dock
         .borrow_mut()

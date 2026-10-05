@@ -99,26 +99,7 @@ impl Dock {
     /// Port of zd_overflow_menu.
     pub fn overflow_menu(&mut self, event: Option<&gdk::Event>) {
         self.hide_preview();
-        if let Some(menu) = self.menu.take() {
-            unsafe {
-                menu.destroy();
-            }
-        }
-        let menu = gtk::Menu::new();
-        self.menu = Some(menu.clone());
-        {
-            let weak = self.weak();
-            menu.connect_destroy(move |w| {
-                if let Some(rc) = weak.upgrade() {
-                    crate::util::with_dock(&rc, |d| {
-                        if d.menu.as_ref().is_some_and(|m| m.as_ptr() == w.as_ptr()) {
-                            d.menu = None;
-                        }
-                    });
-                }
-            });
-        }
-        let overflow = self.overflow.clone();
+        let menu = self.new_menu();
         for b in &self.buttons {
             if !b.eligible || b.widget.is_visible() {
                 continue;
@@ -155,9 +136,8 @@ impl Dock {
             });
             menu.append(&item);
         }
-        let anchor = overflow.clone().upcast::<gtk::Widget>();
+        let anchor = self.overflow.clone().upcast::<gtk::Widget>();
         self.popup_menu_at(&menu, Some(&anchor), event);
-        let _ = overflow;
     }
 
     /// Port of `zd_focus_key`: arrow/Home/End navigation over visible

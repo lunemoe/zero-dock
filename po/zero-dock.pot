@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: zero-dock 0.3.0\n"
 "Report-Msgid-Bugs-To: https://github.com/lunemoe/zero-dock/issues\n"
-"POT-Creation-Date: 2026-10-01 11:53+0800\n"
+"POT-Creation-Date: 2026-10-06 07:12+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,182 +17,300 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/plugin.c:325
-msgid "Zero Dock 窗口停靠"
-msgstr ""
-
-#: src/plugin.c:327
-msgid ""
-"XFCE 原生面板插件 · C / GTK3 / X11\n"
-"独立窗口、固定应用、预览与应用音量控制"
-msgstr ""
-
-#: src/plugin.c:381
-msgid "Zero Dock 需要 X11"
-msgstr ""
-
-#: src/apps.c:158
-msgid "启动请求已发送，但未检测到新窗口。可再次点击重试。"
-msgstr ""
-
-#: src/apps.c:201
+#: rust/src/apps.rs:201
 msgid "启动器文件已失效，请重新拖入该应用的 .desktop 文件。"
 msgstr ""
 
-#: src/apps.c:220
-#, c-format
+#: rust/src/apps.rs:276
 msgid "无法启动应用：%s"
 msgstr ""
 
-#: src/settings.c:22
-msgid "配置文件无法读取，已保留原文件备份并使用默认设置。"
+#: rust/src/apps.rs:317
+msgid "启动请求已发送，但未检测到新窗口。可再次点击重试。"
 msgstr ""
 
-#: src/settings.c:23
-msgid "配置文件无法读取，设置暂不保存。请修复配置后重新加载插件。"
+#: rust/src/associations.rs:76
+msgid "窗口缺少可保存的窗口类，或所选桌面文件无效。"
 msgstr ""
 
-#: src/settings.c:113
-msgid "Zero Dock 提示"
+#: rust/src/associations.rs:111
+msgid "选择关联应用的桌面文件"
 msgstr ""
 
-#: src/settings.c:179 src/settings.c:460
-msgid "导出诊断信息"
-msgstr ""
-
-#: src/settings.c:180 src/settings.c:347 src/associations.c:105
+#: rust/src/associations.rs:115 rust/src/settings.rs:713
+#: rust/src/settings.rs:770
 msgid "取消"
 msgstr ""
 
-#: src/settings.c:180 src/settings.c:347
-msgid "保存"
+#: rust/src/associations.rs:116
+msgid "关联"
 msgstr ""
 
-#: src/settings.c:201
-msgid "当前配置不可保存，请先修复配置文件。"
+#: rust/src/associations.rs:120
+msgid "应用启动器 (*.desktop)"
 msgstr ""
 
-#: src/settings.c:206
-msgid "无法保存当前配置，未创建备份。"
+#: rust/src/associations.rs:126
+msgid ""
+"此规则适用于相同窗口类的所有窗口。\n"
+"窗口类完全相同的多配置应用仍需要应用自身提供不同身份。"
 msgstr ""
 
-#: src/settings.c:223
-msgid "配置必须是小于 1 MiB 的普通文件。"
+#: rust/src/associations.rs:146
+msgid "窗口已关闭，请为仍在运行的窗口设置关联。"
 msgstr ""
 
-#: src/settings.c:268
-msgid "所选文件不是有效的 Zero Dock 配置。"
+#: rust/src/layout.rs:55
+msgid "更多窗口与启动器（%u）"
 msgstr ""
 
-#: src/settings.c:344
-msgid "恢复 Zero Dock 配置"
+#: rust/src/menu.rs:169 rust/src/button.rs:176
+msgid "无标题窗口"
 msgstr ""
 
-#: src/settings.c:344
-msgid "备份 Zero Dock 配置"
+#: rust/src/menu.rs:197
+msgid "本应用的窗口"
 msgstr ""
 
-#: src/settings.c:347
-msgid "恢复"
+#: rust/src/menu.rs:222
+msgid "恢复窗口"
 msgstr ""
 
-#: src/settings.c:356
-msgid "恢复固定应用、手动关联与设置；恢复前自动备份当前配置。"
+#: rust/src/menu.rs:224
+msgid "最小化"
 msgstr ""
 
-#: src/settings.c:357
-msgid "备份包含固定启动器和手动关联的本机文件路径。"
+#: rust/src/menu.rs:238
+msgid "还原大小"
 msgstr ""
 
-#: src/settings.c:372
-msgid "Zero Dock 设置"
+#: rust/src/menu.rs:240
+msgid "最大化"
 msgstr ""
 
-#: src/settings.c:372
-msgid "关闭"
+#: rust/src/menu.rs:253
+msgid "退出全屏"
 msgstr ""
 
-#: src/settings.c:396
-msgid "显示可点击的窗口预览"
+#: rust/src/menu.rs:253
+msgid "全屏"
 msgstr ""
 
-#: src/settings.c:396
-msgid "同应用多窗口显示序号"
+#: rust/src/menu.rs:266
+msgid "取消置顶"
 msgstr ""
 
-#: src/settings.c:397
-msgid "显示所有工作区的窗口"
+#: rust/src/menu.rs:268
+msgid "置顶"
 msgstr ""
 
-#: src/settings.c:397
-msgid "滚轮切换窗口"
+#: rust/src/menu.rs:282
+msgid "移到工作区"
 msgstr ""
 
-#: src/settings.c:408
-msgid "预留图标位置（0 为自动宽度）"
+#: rust/src/menu.rs:301
+msgid "工作区 %u"
 msgstr ""
 
-#: src/settings.c:409
-msgid "预览宽度（像素）"
+#: rust/src/menu.rs:328 rust/src/preview.rs:455
+msgid "取消应用静音"
 msgstr ""
 
-#: src/settings.c:410
-msgid "悬停延时（毫秒）"
+#: rust/src/menu.rs:330 rust/src/preview.rs:457
+msgid "应用静音"
 msgstr ""
 
-#: src/settings.c:411
-msgid "预览刷新间隔（毫秒）"
-msgstr ""
-
-#: src/settings.c:412
-msgid "启动等待时间（毫秒）"
-msgstr ""
-
-#: src/settings.c:413
-msgid "最多显示图标数（含溢出按钮，0 为不限）"
-msgstr ""
-
-#: src/settings.c:430
-msgid "左键行为"
-msgstr ""
-
-#: src/settings.c:430
-msgid "中键行为"
-msgstr ""
-
-#: src/settings.c:431
-msgid "激活 / 最小化"
-msgstr ""
-
-#: src/settings.c:431
-msgid "仅激活"
-msgstr ""
-
-#: src/settings.c:432 src/menu.c:202 src/menu.c:241
+#: rust/src/menu.rs:333 rust/src/menu.rs:412 rust/src/settings.rs:573
 msgid "启动新窗口"
 msgstr ""
 
-#: src/settings.c:432 src/menu.c:214 src/preview.c:366 src/preview.c:368
+#: rust/src/menu.rs:346 rust/src/menu.rs:449
+msgid "取消固定"
+msgstr ""
+
+#: rust/src/menu.rs:348
+msgid "固定到启动器"
+msgstr ""
+
+#: rust/src/menu.rs:358
+msgid "关联到应用…"
+msgstr ""
+
+#: rust/src/menu.rs:362
+msgid "清除手动关联"
+msgstr ""
+
+#: rust/src/menu.rs:371 rust/src/preview.rs:304 rust/src/preview.rs:306
+#: rust/src/settings.rs:573
 msgid "关闭窗口"
 msgstr ""
 
-#: src/settings.c:432
+#: rust/src/menu.rs:425
+msgid "向左移动"
+msgstr ""
+
+#: rust/src/menu.rs:427
+msgid "向上移动"
+msgstr ""
+
+#: rust/src/menu.rs:437
+msgid "向右移动"
+msgstr ""
+
+#: rust/src/menu.rs:439
+msgid "向下移动"
+msgstr ""
+
+#. -- panel menu integration ----------------------------------------------
+#. / Insert the show-desktop toggle and minimize-all entries into the
+
+#. / panel's own context menu.
+
+#: rust/src/menu.rs:481
+msgid "显示桌面"
+msgstr ""
+
+#: rust/src/menu.rs:510
+msgid "最小化所有窗口"
+msgstr ""
+
+#: rust/src/preview.rs:504
+msgid "已最小化 · 最后一帧"
+msgstr ""
+
+#: rust/src/preview.rs:506
+msgid "点击预览切换窗口"
+msgstr ""
+
+#: rust/src/preview.rs:509
+msgid "暂无可用画面 · 点击恢复窗口"
+msgstr ""
+
+#: rust/src/preview.rs:521
+msgid "所有工作区"
+msgstr ""
+
+#: rust/src/preview.rs:556
+msgid "应用已静音 · %u%%"
+msgstr ""
+
+#: rust/src/preview.rs:560
+msgid "应用音量 %u%%"
+msgstr ""
+
+#: rust/src/settings.rs:104
+msgid "配置文件无法读取，已保留原文件备份并使用默认设置。"
+msgstr ""
+
+#: rust/src/settings.rs:106
+msgid "配置文件无法读取，设置暂不保存。请修复配置后重新加载插件。"
+msgstr ""
+
+#: rust/src/settings.rs:133
+msgid "Zero Dock 提示"
+msgstr ""
+
+#: rust/src/settings.rs:205
+msgid "当前配置不可保存，请先修复配置文件。"
+msgstr ""
+
+#: rust/src/settings.rs:211
+msgid "无法保存当前配置，未创建备份。"
+msgstr ""
+
+#: rust/src/settings.rs:224 rust/src/settings.rs:230
+msgid "配置必须是小于 1 MiB 的普通文件。"
+msgstr ""
+
+#: rust/src/settings.rs:281
+msgid "所选文件不是有效的 Zero Dock 配置。"
+msgstr ""
+
+#: rust/src/settings.rs:441
+msgid "Zero Dock 设置"
+msgstr ""
+
+#: rust/src/settings.rs:444
+msgid "关闭"
+msgstr ""
+
+#: rust/src/settings.rs:468
+msgid "显示可点击的窗口预览"
+msgstr ""
+
+#: rust/src/settings.rs:469
+msgid "同应用多窗口显示序号"
+msgstr ""
+
+#: rust/src/settings.rs:470
+msgid "显示所有工作区的窗口"
+msgstr ""
+
+#: rust/src/settings.rs:471
+msgid "滚轮切换窗口"
+msgstr ""
+
+#: rust/src/settings.rs:494
+msgid "预留图标位置（0 为自动宽度）"
+msgstr ""
+
+#: rust/src/settings.rs:501
+msgid "预览宽度（像素）"
+msgstr ""
+
+#: rust/src/settings.rs:508
+msgid "悬停延时（毫秒）"
+msgstr ""
+
+#: rust/src/settings.rs:515
+msgid "预览刷新间隔（毫秒）"
+msgstr ""
+
+#: rust/src/settings.rs:522
+msgid "启动等待时间（毫秒）"
+msgstr ""
+
+#: rust/src/settings.rs:529
+msgid "最多显示图标数（含溢出按钮，0 为不限）"
+msgstr ""
+
+#: rust/src/settings.rs:566
+msgid "左键行为"
+msgstr ""
+
+#: rust/src/settings.rs:568
+msgid "激活 / 最小化"
+msgstr ""
+
+#: rust/src/settings.rs:568
+msgid "仅激活"
+msgstr ""
+
+#: rust/src/settings.rs:571
+msgid "中键行为"
+msgstr ""
+
+#: rust/src/settings.rs:573
 msgid "不操作"
 msgstr ""
 
-#: src/settings.c:449
+#: rust/src/settings.rs:601
 msgid "备份配置…"
 msgstr ""
 
-#: src/settings.c:449
+#: rust/src/settings.rs:601
 msgid "恢复配置…"
 msgstr ""
 
-#: src/settings.c:459
+#: rust/src/settings.rs:616
 msgid "恢复默认设置（保留固定应用）"
 msgstr ""
 
-#: src/settings.c:466
+#: rust/src/settings.rs:617 rust/src/settings.rs:709
+msgid "导出诊断信息"
+msgstr ""
+
+#: rust/src/settings.rs:639
 msgid ""
 "固定图标复用首个窗口，其他窗口独立显示。\n"
 "拖入 .desktop 文件可固定应用。\n"
@@ -200,172 +318,56 @@ msgid ""
 "预览画面仅保存在内存中。"
 msgstr ""
 
-#: src/buttons.c:605
-msgid "取消应用静音 · 滚轮调音量"
+#: rust/src/settings.rs:714 rust/src/settings.rs:762
+msgid "保存"
 msgstr ""
 
-#: src/buttons.c:606
-msgid "应用静音 · 滚轮调音量"
+#: rust/src/settings.rs:754
+msgid "恢复 Zero Dock 配置"
 msgstr ""
 
-#: src/buttons.c:668 src/layout.c:94
+#: rust/src/settings.rs:756
+msgid "恢复"
+msgstr ""
+
+#: rust/src/settings.rs:760
+msgid "备份 Zero Dock 配置"
+msgstr ""
+
+#: rust/src/settings.rs:779
+msgid "恢复固定应用、手动关联与设置；恢复前自动备份当前配置。"
+msgstr ""
+
+#: rust/src/settings.rs:781
+msgid "备份包含固定启动器和手动关联的本机文件路径。"
+msgstr ""
+
+#: rust/src/button.rs:181
 msgid "启动器文件已失效"
 msgstr ""
 
-#: src/buttons.c:669
+#: rust/src/button.rs:1370
 msgid "正在启动…"
 msgstr ""
 
-#: src/menu.c:130 src/menu.c:131 src/layout.c:98 src/layout.c:99
-msgid "无标题窗口"
+#: rust/src/button.rs:1425
+msgid "取消应用静音 · 滚轮调音量"
 msgstr ""
 
-#: src/menu.c:143
-msgid "本应用的窗口"
+#: rust/src/button.rs:1427
+msgid "应用静音 · 滚轮调音量"
 msgstr ""
 
-#: src/menu.c:161
-msgid "恢复窗口"
+#: rust/src/dock.rs:516
+msgid "Zero Dock 窗口停靠"
 msgstr ""
 
-#: src/menu.c:161
-msgid "最小化"
-msgstr ""
-
-#: src/menu.c:165
-msgid "还原大小"
-msgstr ""
-
-#: src/menu.c:165
-msgid "最大化"
-msgstr ""
-
-#: src/menu.c:169
-msgid "退出全屏"
-msgstr ""
-
-#: src/menu.c:169
-msgid "全屏"
-msgstr ""
-
-#: src/menu.c:173
-msgid "取消置顶"
-msgstr ""
-
-#: src/menu.c:173
-msgid "置顶"
-msgstr ""
-
-#: src/menu.c:177
-msgid "移到工作区"
-msgstr ""
-
-#: src/menu.c:188
-#, c-format
-msgid "工作区 %u"
-msgstr ""
-
-#: src/menu.c:200 src/preview.c:286
-msgid "取消应用静音"
-msgstr ""
-
-#: src/menu.c:200 src/preview.c:286
-msgid "应用静音"
-msgstr ""
-
-#: src/menu.c:205 src/menu.c:254
-msgid "取消固定"
-msgstr ""
-
-#: src/menu.c:205
-msgid "固定到启动器"
-msgstr ""
-
-#: src/menu.c:208
-msgid "关联到应用…"
-msgstr ""
-
-#: src/menu.c:210
-msgid "清除手动关联"
-msgstr ""
-
-#: src/menu.c:246
-msgid "向左移动"
-msgstr ""
-
-#: src/menu.c:247
-msgid "向上移动"
-msgstr ""
-
-#: src/menu.c:250
-msgid "向右移动"
-msgstr ""
-
-#: src/menu.c:251
-msgid "向下移动"
-msgstr ""
-
-#: src/menu.c:287
-msgid "显示桌面"
-msgstr ""
-
-#: src/menu.c:292
-msgid "最小化所有窗口"
-msgstr ""
-
-#: src/preview.c:313
-msgid "已最小化 · 最后一帧"
-msgstr ""
-
-#: src/preview.c:314
-msgid "点击预览切换窗口"
-msgstr ""
-
-#: src/preview.c:318
-msgid "暂无可用画面 · 点击恢复窗口"
-msgstr ""
-
-#: src/preview.c:326
-msgid "所有工作区"
-msgstr ""
-
-#: src/preview.c:435
-#, c-format
-msgid "应用已静音 · %u%%"
-msgstr ""
-
-#: src/preview.c:435
-#, c-format
-msgid "应用音量 %u%%"
-msgstr ""
-
-#: src/associations.c:57
-msgid "窗口缺少可保存的窗口类，或所选桌面文件无效。"
-msgstr ""
-
-#: src/associations.c:88
-msgid "窗口已关闭，请为仍在运行的窗口设置关联。"
-msgstr ""
-
-#: src/associations.c:104
-msgid "选择关联应用的桌面文件"
-msgstr ""
-
-#: src/associations.c:105
-msgid "关联"
-msgstr ""
-
-#: src/associations.c:107
-msgid "应用启动器 (*.desktop)"
-msgstr ""
-
-#: src/associations.c:113
+#: rust/src/dock.rs:519
 msgid ""
-"此规则适用于相同窗口类的所有窗口。\n"
-"窗口类完全相同的多配置应用仍需要应用自身提供不同身份。"
+"XFCE 原生面板插件 · C / GTK3 / X11\n"
+"独立窗口、固定应用、预览与应用音量控制"
 msgstr ""
 
-#: src/layout.c:46
-#, c-format
-msgid "更多窗口与启动器（%u）"
+#: rust/src/dock.rs:559
+msgid "Zero Dock 需要 X11"
 msgstr ""
