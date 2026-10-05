@@ -373,6 +373,13 @@ fn private_file_round_trip_and_mode() {
         .collect();
     assert!(leftovers.is_empty(), "temp files must be renamed away");
 
+    // A leftover temp file from a crashed writer with the same (recycled)
+    // pid must not block the next write.
+    let stale = dir.join(format!("config.rc.zd-tmp-{}", std::process::id()));
+    std::fs::write(&stale, b"stale").unwrap();
+    write_private_file(&path.to_string_lossy(), b"third").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"third");
+
     // Unwritable target fails cleanly.
     assert!(write_private_file("/nonexistent-dir/zd/x", b"no").is_err());
 

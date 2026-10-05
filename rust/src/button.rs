@@ -602,14 +602,12 @@ impl Dock {
         self.app_generation += 1;
         let has_window = self.button(button_id).is_some_and(|b| b.window.is_some());
         if has_window {
-            let (xid, key) = {
+            {
                 let b = self.button_mut(button_id).unwrap();
                 b.pinned = false;
                 b.desktop = None;
-                (b.window_xid(), format!("window:{}", b.window_xid()))
-            };
-            let _ = xid;
-            self.button_mut(button_id).unwrap().key = key;
+                b.key = format!("window:{}", b.window_xid());
+            }
             if let Some(menu) = self.menu.take() {
                 unsafe {
                     menu.destroy();

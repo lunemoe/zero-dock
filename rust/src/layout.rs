@@ -135,9 +135,6 @@ impl Dock {
                 .as_ref()
                 .is_some_and(|w| crate::ffi_xfce::Window::new(w).is_active());
             item.set_active(active);
-            unsafe {
-                item.set_data("zd-key", b.key.clone());
-            }
             let weak = self.weak();
             let item_key = b.key.clone();
             item.connect_activate(move |_| {

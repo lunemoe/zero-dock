@@ -162,7 +162,10 @@ unsafe fn render_scaled(
     if src.is_null() {
         return None;
     }
-    let src = cairo::Surface::from_raw_none(src);
+    // from_raw_full takes ownership of the reference returned by
+    // cairo_xlib_surface_create; from_raw_none adds a second one and leaks
+    // the surface on every capture.
+    let src = cairo::Surface::from_raw_full(src).ok()?;
     let dst = cairo::ImageSurface::create(cairo::Format::ARgb32, dst_w, dst_h).ok()?;
     let cr = cairo::Context::new(&dst).ok()?;
     cr.scale(dst_w as f64 / src_w as f64, dst_h as f64 / src_h as f64);

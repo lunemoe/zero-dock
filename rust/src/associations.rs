@@ -144,9 +144,11 @@ impl Dock {
                             let live = d.window_index.contains_key(&(window.as_ptr() as usize));
                             if !live {
                                 d.show_error(&t("窗口已关闭，请为仍在运行的窗口设置关联。"));
-                            } else {
-                                let path = path.as_ref().map(|p| p.to_string_lossy().into_owned());
-                                if let Err(e) = d.associate(&window, path.as_deref()) {
+                            } else if let Some(path) = path.as_ref() {
+                                // Confirming without a chosen file keeps the current
+                                // rule; only an explicit pick may replace or clear it.
+                                let path = path.to_string_lossy().into_owned();
+                                if let Err(e) = d.associate(&window, Some(&path)) {
                                     d.show_error(e.message());
                                 }
                             }

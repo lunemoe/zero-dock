@@ -362,11 +362,24 @@ pub fn write_private_file(path: &str, contents: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let tmp = format!("{}.zd-tmp-{}", path, std::process::id());
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&tmp)?;
+    let open = || {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)
+    };
+    // A crash between create and rename leaves the temp file behind; with a
+    // recycled pid it would then block every future save, so drop it and
+    // retry once.
+    let mut file = match open() {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = std::fs::remove_file(&tmp);
+            open()?
+        }
+        Err(e) => return Err(e),
+    };
     file.write_all(contents)?;
     file.sync_all()?;
     drop(file);
