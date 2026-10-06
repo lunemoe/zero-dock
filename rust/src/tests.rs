@@ -555,3 +555,52 @@ fn association_helpers() {
     assert!(!valid_key(&"0".repeat(65)));
     assert!(!valid_key(&"g".repeat(64)));
 }
+
+// ---------------------------------------------------------------------------
+// Launch identity probe (apps.rs)
+// ---------------------------------------------------------------------------
+
+use crate::apps::launch_probe_score;
+
+/// A matching startup id is the strongest launch signal.
+#[test]
+fn launch_probe_startup_id_match_wins() {
+    let pid = std::process::id() as i32;
+    // Self-descendance would also score 200, so the id must outrank it.
+    assert_eq!(
+        launch_probe_score(Some("id-1"), Some("id-1"), pid, pid),
+        220
+    );
+    // Even with no usable pid data.
+    assert_eq!(launch_probe_score(Some("id-1"), Some("id-1"), 0, 0), 220);
+}
+
+/// A *mismatched* startup id must not swallow the ancestry fallback: this is
+/// the regression where a launcher lost the window it had just started.
+#[test]
+fn launch_probe_falls_back_to_ancestry_on_mismatch() {
+    let pid = std::process::id() as i32;
+    assert_eq!(
+        launch_probe_score(Some("stale-id"), Some("our-id"), pid, pid),
+        200,
+        "mismatched ids must fall back to process ancestry"
+    );
+    assert_eq!(
+        launch_probe_score(Some("stale-id"), Some("our-id"), 0, 0),
+        0,
+        "with neither id nor ancestry matching there is no bonus"
+    );
+}
+
+/// Partial information still uses whichever probe is available.
+#[test]
+fn launch_probe_handles_missing_halves() {
+    let pid = std::process::id() as i32;
+    assert_eq!(launch_probe_score(None, Some("our-id"), pid, pid), 200);
+    assert_eq!(launch_probe_score(Some("stale"), None, pid, pid), 200);
+    assert_eq!(launch_probe_score(None, None, pid, pid), 200);
+    assert_eq!(launch_probe_score(Some(""), Some(""), pid, pid), 200);
+    // launch_pid of 1 or less is "unknown", never a match.
+    assert_eq!(launch_probe_score(None, None, pid, 1), 0);
+    assert_eq!(launch_probe_score(None, None, pid, 0), 0);
+}

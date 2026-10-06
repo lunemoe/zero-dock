@@ -1,258 +1,62 @@
-//! Separate XInput2 connection, raw scroll device handling and speaker hit
-//! testing. Ported from `src/input.c`.
+//! XInput2 raw scroll handling and speaker hit testing. Ported from
+//! `src/input.c`.
 //!
-//! The connection is deliberately independent from GTK's X connection (its
-//! event selections never touch GDK), and the fd source is removed by `Drop`
-//! before the display is closed.
+//! The X connection itself (open, event selection, translation) lives in
+//! [`crate::ffi_x11::XInputConnection`]; this module owns the GLib IO watch and
+//! the dock-side dispatch, so it stays safe Rust.
 
 use crate::dock::Dock;
+use crate::ffi_x11::{InputEvent, XInputConnection};
 use crate::util::DockWeak;
 use glib::IOCondition;
 use gtk::prelude::*;
-use std::collections::HashMap;
-use std::os::raw::{c_char, c_int, c_uint};
-use x11::xinput2;
-use x11::xlib;
-
-#[derive(Clone, Copy, Default, Debug)]
-struct ScrollAxes {
-    x_axis: i32,
-    y_axis: i32,
-    x_increment: f64,
-    y_increment: f64,
-}
 
 pub struct Input {
-    display: *mut xlib::Display,
-    root: xlib::Window,
-    opcode: c_int,
+    connection: Option<XInputConnection>,
     source: Option<glib::SourceId>,
-    axes: HashMap<i32, ScrollAxes>,
-}
-
-// XIMaskLen from XInput2.h: bytes needed to hold a bit for each event type.
-const fn ximask_len(event: i32) -> usize {
-    (((event) + 7) >> 3) as usize
 }
 
 impl Drop for Input {
     fn drop(&mut self) {
+        // Detach the fd source before the connection is closed with it.
         if let Some(source) = self.source.take() {
             source.remove();
-        }
-        unsafe {
-            xlib::XCloseDisplay(self.display);
         }
     }
 }
 
 impl Input {
     pub fn new(weak: DockWeak) -> Option<Input> {
-        unsafe {
-            let display = xlib::XOpenDisplay(std::ptr::null());
-            if display.is_null() {
-                return None;
-            }
-            let mut opcode: c_int = 0;
-            let mut event_code: c_int = 0;
-            let mut error: c_int = 0;
-            let mut major: c_int = 2;
-            let mut minor: c_int = 1;
-            let name = b"XInputExtension\0";
-            if xlib::XQueryExtension(
-                display,
-                name.as_ptr() as *const c_char,
-                &mut opcode,
-                &mut event_code,
-                &mut error,
-            ) == xlib::False
-                || xinput2::XIQueryVersion(display, &mut major, &mut minor) != 0
-                || (major == 2 && minor < 1)
-            {
-                xlib::XCloseDisplay(display);
-                return None;
-            }
-            let root = xlib::XDefaultRootWindow(display);
-
-            let mut input = Input {
-                display,
-                root,
-                opcode,
-                source: None,
-                axes: HashMap::new(),
-            };
-
-            let mut raw = [0u8; ximask_len(xinput2::XI_LASTEVENT)];
-            let mut change = [0u8; ximask_len(xinput2::XI_LASTEVENT)];
-            xinput2::XISetMask(&mut raw, xinput2::XI_RawMotion);
-            xinput2::XISetMask(&mut change, xinput2::XI_HierarchyChanged);
-            xinput2::XISetMask(&mut change, xinput2::XI_DeviceChanged);
-            let mut masks = [
-                xinput2::XIEventMask {
-                    deviceid: xinput2::XIAllMasterDevices,
-                    mask_len: raw.len() as c_int,
-                    mask: raw.as_mut_ptr(),
-                },
-                xinput2::XIEventMask {
-                    deviceid: xinput2::XIAllDevices,
-                    mask_len: change.len() as c_int,
-                    mask: change.as_mut_ptr(),
-                },
-            ];
-            xinput2::XISelectEvents(display, root, masks.as_mut_ptr(), masks.len() as c_int);
-            xlib::XFlush(display);
-
-            let fd = xlib::XConnectionNumber(display);
-            let weak_fd = weak.clone();
-            let source = glib::unix_fd_add_local(
-                fd,
-                IOCondition::IN | IOCondition::HUP | IOCondition::ERR,
-                move |_fd, condition| {
-                    if condition.contains(IOCondition::HUP) || condition.contains(IOCondition::ERR)
-                    {
-                        // Connection died: detach the source without removing
-                        // it from inside its own callback.
-                        if let Some(rc) = weak_fd.upgrade() {
-                            crate::util::with_dock(&rc, |d| {
-                                if let Some(input) = d.input.as_mut() {
-                                    input.source = None;
-                                }
-                            });
-                        }
-                        return glib::ControlFlow::Break;
-                    }
+        let mut connection = XInputConnection::open()?;
+        connection.select_events();
+        let fd = connection.connection_number();
+        let weak_fd = weak.clone();
+        let source = glib::unix_fd_add_local(
+            fd,
+            IOCondition::IN | IOCondition::HUP | IOCondition::ERR,
+            move |_fd, condition| {
+                if condition.contains(IOCondition::HUP) || condition.contains(IOCondition::ERR) {
+                    // Connection died: detach the source without removing it
+                    // from inside its own callback.
                     if let Some(rc) = weak_fd.upgrade() {
-                        crate::util::with_dock(&rc, |d| d.pump_input());
+                        crate::util::with_dock(&rc, |d| {
+                            if let Some(input) = d.input.as_mut() {
+                                input.source = None;
+                            }
+                        });
                     }
-                    glib::ControlFlow::Continue
-                },
-            );
-            input.source = Some(source);
-            Some(input)
-        }
-    }
-
-    /// Read and dispatch pending X events on the private connection.
-    pub fn drain(&mut self, dock: &mut Dock) {
-        unsafe {
-            while xlib::XPending(self.display) > 0 {
-                let mut event: xlib::XEvent = std::mem::zeroed();
-                xlib::XNextEvent(self.display, &mut event);
-                if event.type_ != xlib::GenericEvent {
-                    continue;
+                    return glib::ControlFlow::Break;
                 }
-                if event.generic_event_cookie.extension != self.opcode {
-                    continue;
+                if let Some(rc) = weak_fd.upgrade() {
+                    crate::util::with_dock(&rc, |d| d.pump_input());
                 }
-                if xlib::XGetEventData(self.display, &mut event.generic_event_cookie) == 0 {
-                    continue;
-                }
-                let data = event.generic_event_cookie.data as *const xinput2::XIRawEvent;
-                if !data.is_null() {
-                    match (*data).evtype {
-                        xinput2::XI_RawMotion => self.raw_motion(dock, &*data),
-                        xinput2::XI_HierarchyChanged | xinput2::XI_DeviceChanged => {
-                            self.axes.clear();
-                        }
-                        _ => {}
-                    }
-                }
-                xlib::XFreeEventData(self.display, &mut event.generic_event_cookie);
-            }
-        }
-    }
-
-    fn scroll_axes(&mut self, source: i32) -> ScrollAxes {
-        if let Some(axes) = self.axes.get(&source) {
-            return *axes;
-        }
-        let mut axes = ScrollAxes {
-            x_axis: -1,
-            y_axis: -1,
-            x_increment: 0.0,
-            y_increment: 0.0,
-        };
-        unsafe {
-            let mut count: c_int = 0;
-            let devices = xinput2::XIQueryDevice(self.display, source, &mut count);
-            if !devices.is_null() {
-                for j in 0..count as usize {
-                    let device = &*devices.add(j);
-                    for i in 0..device.num_classes as usize {
-                        let class = *device.classes.add(i);
-                        if (*class)._type != xinput2::XIScrollClass {
-                            continue;
-                        }
-                        let scroll = &*(class as *const xinput2::XIScrollClassInfo);
-                        if scroll.increment == 0.0 {
-                            continue;
-                        }
-                        if scroll.scroll_type == xinput2::XIScrollTypeVertical {
-                            axes.y_axis = scroll.number;
-                            axes.y_increment = scroll.increment;
-                        } else {
-                            axes.x_axis = scroll.number;
-                            axes.x_increment = scroll.increment;
-                        }
-                    }
-                }
-                xinput2::XIFreeDeviceInfo(devices);
-            }
-        }
-        self.axes.insert(source, axes);
-        axes
-    }
-
-    unsafe fn raw_motion(&mut self, dock: &mut Dock, event: &xinput2::XIRawEvent) {
-        let source = if event.sourceid != 0 {
-            event.sourceid
-        } else {
-            event.deviceid
-        };
-        let axes = self.scroll_axes(source);
-        let mut dx = 0.0f64;
-        let mut dy = 0.0f64;
-        let mut value = event.valuators.values;
-        let bits = event.valuators.mask_len * 8;
-        for i in 0..bits {
-            if !xinput2::XIMaskIsSet(
-                std::slice::from_raw_parts(event.valuators.mask, event.valuators.mask_len as usize),
-                i,
-            ) {
-                continue;
-            }
-            if i == axes.x_axis && axes.x_increment != 0.0 {
-                dx = *value / axes.x_increment;
-            }
-            if i == axes.y_axis && axes.y_increment != 0.0 {
-                dy = *value / axes.y_increment;
-            }
-            value = value.add(1);
-        }
-        if dx == 0.0 && dy == 0.0 {
-            return;
-        }
-        let mut root: xlib::Window = 0;
-        let mut child: xlib::Window = 0;
-        let mut x = 0;
-        let mut y = 0;
-        let mut wx = 0;
-        let mut wy = 0;
-        let mut mask: c_uint = 0;
-        if xlib::XQueryPointer(
-            self.display,
-            self.root,
-            &mut root,
-            &mut child,
-            &mut x,
-            &mut y,
-            &mut wx,
-            &mut wy,
-            &mut mask,
-        ) != 0
-        {
-            dock.input_delta(x, y, dx, dy, event.time as u32);
-        }
+                glib::ControlFlow::Continue
+            },
+        );
+        Some(Input {
+            connection: Some(connection),
+            source: Some(source),
+        })
     }
 }
 
@@ -261,10 +65,22 @@ impl Dock {
         if self.disposing {
             return;
         }
-        // Temporarily take the input handler out so `drain` can borrow the
+        // Temporarily take the input handler out so draining can borrow the
         // whole dock (the fd source only fires on the main loop).
         if let Some(mut input) = self.input.take() {
-            input.drain(self);
+            if let Some(connection) = input.connection.as_mut() {
+                connection.drain(|event| match event {
+                    InputEvent::Scroll {
+                        x,
+                        y,
+                        delta_x,
+                        delta_y,
+                        time,
+                    } => self.input_delta(x, y, delta_x, delta_y, time),
+                    // Device list changed; cached axis mappings were dropped.
+                    InputEvent::DevicesChanged => {}
+                });
+            }
             self.input = Some(input);
         }
     }

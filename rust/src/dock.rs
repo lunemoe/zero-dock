@@ -11,6 +11,7 @@
 //!   the live list — no raw pointers cross callback boundaries.
 
 use crate::button::Button;
+use crate::ffi_gtk;
 use crate::ffi_x11::Atom;
 use crate::ffi_xfce::{Screen, XfcePanelPlugin};
 use crate::input::Input;
@@ -391,29 +392,19 @@ impl Dock {
 
         self.popups_dispose();
         if let Some(dialog) = self.association_dialog.take() {
-            unsafe {
-                dialog.destroy();
-            }
+            ffi_gtk::destroy(&dialog);
         }
         if let Some(dialog) = self.settings_dialog.take() {
-            unsafe {
-                dialog.destroy();
-            }
+            ffi_gtk::destroy(&dialog);
         }
         if let Some(dialog) = self.error_dialog.take() {
-            unsafe {
-                dialog.destroy();
-            }
+            ffi_gtk::destroy(&dialog);
         }
         if let Some(dialog) = self.about_dialog.take() {
-            unsafe {
-                dialog.destroy();
-            }
+            ffi_gtk::destroy(&dialog);
         }
         if let Some(menu) = self.menu.take() {
-            unsafe {
-                menu.destroy();
-            }
+            ffi_gtk::destroy(&menu);
         }
         self.audio = None; // Drop impl: timers cleared, context disconnected
 
@@ -534,8 +525,8 @@ impl Dock {
         }
         {
             let dialog_clone = dialog.clone();
-            dialog.connect_response(move |_, _| unsafe {
-                dialog_clone.destroy();
+            dialog.connect_response(move |_, _| {
+                ffi_gtk::destroy(&dialog_clone);
             });
         }
         dialog.show();
@@ -589,19 +580,9 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
         .style_context()
         .add_provider(&css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
-    let rc_path = unsafe {
-        let test_rc =
-            glib::gobject_ffi::g_object_get_data(plugin.0, c"test-rc".as_ptr() as *const _);
-        if !test_rc.is_null() {
-            Some(
-                std::ffi::CStr::from_ptr(test_rc as *const _)
-                    .to_string_lossy()
-                    .into_owned(),
-            )
-        } else {
-            plugin.save_location(true)
-        }
-    };
+    let rc_path = ffi_gtk::object_data_str(&plugin.as_object(), "test-rc")
+        .filter(|path| !path.is_empty())
+        .or_else(|| plugin.save_location(true));
 
     let identity_atoms: [Atom; 4] = IDENTITY_PROPERTIES
         .iter()
@@ -832,14 +813,7 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
         dock_rc.borrow_mut().screen_handlers.push(handler);
 
         // Workspace group changes
-        let manager = screen.workspace_manager();
-        let groups = unsafe {
-            crate::util::glist_borrow_objects(
-                crate::ffi_xfce::xfw_workspace_manager_list_workspace_groups(
-                    glib::translate::ToGlibPtr::to_glib_none(&manager).0,
-                ),
-            )
-        };
+        let groups = screen.workspace_groups();
         for group in groups {
             let weak = Rc::downgrade(&dock_rc);
             let handler = group.connect_local("active-workspace-changed", false, move |_| {
@@ -992,30 +966,20 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
 
     // Hand ownership to the plugin object; free-data/finalize drops it.
     let handle = dock_rc.clone();
-    unsafe {
-        let boxed: Box<DockRef> = Box::new(dock_rc);
-        glib::gobject_ffi::g_object_set_data_full(
-            plugin_ptr.0,
-            c"zero-dock".as_ptr() as *const _,
-            Box::into_raw(boxed) as *mut _,
-            Some(destroy_dock_data),
-        );
-    }
+    ffi_gtk::set_owned_data(
+        &plugin_ptr.as_object(),
+        "zero-dock",
+        dock_rc,
+        |dock: DockRef| {
+            crate::util::with_dock(&dock, |d| {
+                if !d.disposing {
+                    d.dispose();
+                }
+            });
+        },
+    );
 
     Some(handle)
-}
-
-unsafe extern "C" fn destroy_dock_data(data: *mut std::os::raw::c_void) {
-    if data.is_null() {
-        return;
-    }
-    let dock = Box::from_raw(data as *mut DockRef);
-    crate::util::with_dock(&dock, |d| {
-        if !d.disposing {
-            d.dispose();
-        }
-    });
-    drop(dock);
 }
 
 fn with_dock_ref<T>(rc: &DockRef, f: impl FnOnce(&mut Dock) -> T) -> Option<T> {

@@ -8,6 +8,7 @@
 //! here, not by discipline.
 
 use crate::dock::Dock;
+use crate::ffi_gtk;
 use crate::ffi_x11;
 use crate::ffi_xfce;
 use crate::settings::is_absolute_desktop_path;
@@ -15,10 +16,6 @@ use crate::util::{monotonic_us, t, DockWeak};
 use gdk::keys::constants as Key;
 use gdk::prelude::*;
 use gtk::prelude::*;
-
-extern "C" {
-    fn pango_cairo_show_layout(cr: *mut cairo::ffi::cairo_t, layout: *mut pango::ffi::PangoLayout);
-}
 
 /// A normalized scroll event: built from GDK events by handlers and from raw
 /// coordinates by the XInput2 path, so audio code never touches GDK events.
@@ -57,7 +54,7 @@ pub struct Button {
     pub window: Option<glib::Object>, // XfwWindow
     pub window_handlers: Vec<glib::SignalHandlerId>,
     pub xwindow: Option<gdk::Window>,
-    pub filter_data: Option<*mut IdentityFilter>,
+    pub property_watch: Option<ffi_x11::PropertyWatch>,
     pub app: Option<gio::DesktopAppInfo>,
     pub desktop: Option<String>,
     pub key: String,
@@ -123,7 +120,7 @@ impl Button {
             window: None,
             window_handlers: Vec::new(),
             xwindow: None,
-            filter_data: None,
+            property_watch: None,
             app: None,
             desktop: None,
             key: String::new(),
@@ -157,9 +154,7 @@ impl Button {
 
     /// Destroy the button's widgets (equivalent of `zd_button_free` UI part).
     pub fn destroy_widgets(&mut self) {
-        unsafe {
-            self.widget.destroy();
-        }
+        ffi_gtk::destroy(&self.widget);
     }
 
     pub fn window_xid(&self) -> ffi_x11::Window {
@@ -330,32 +325,21 @@ impl Dock {
         }
         self.buttons[index].window_handlers = handlers;
 
-        // Watch identity properties (ports the GdkWindow X event filter).
-        unsafe {
-            ffi_x11::error_trap_push();
-            let foreign = ffi_x11::gdk_x11_window_foreign_new_for_display(
-                ffi_x11::gdk_display(),
-                ffi_xfce::Window::new(window).xid(),
-            );
-            if !foreign.is_null() {
-                let xwindow: gdk::Window = glib::translate::from_glib_full(foreign);
-                let events = xwindow.events() | gdk::EventMask::PROPERTY_CHANGE_MASK;
-                xwindow.set_events(events);
-                let data = Box::new(IdentityFilter {
-                    weak: self.weak(),
-                    button_id,
-                    atoms: self.identity_atoms,
-                });
-                let data_ptr = Box::into_raw(data);
-                ffi_x11::gdk_window_add_filter(
-                    glib::translate::ToGlibPtr::to_glib_none(&xwindow).0,
-                    Some(identity_filter),
-                    data_ptr as *mut _,
-                );
-                self.buttons[index].xwindow = Some(xwindow);
-                self.buttons[index].filter_data = Some(data_ptr);
-            }
-            ffi_x11::error_trap_pop_ignored();
+        // Watch the identity properties (ports the GdkWindow X event filter).
+        let xid = ffi_xfce::Window::new(window).xid();
+        let watch = ffi_x11::watch_window_properties(xid).map(|xwindow| {
+            let weak = self.weak();
+            let atoms = self.identity_atoms;
+            let watch = ffi_x11::PropertyWatch::new(&xwindow, &atoms, move || {
+                if let Some(rc) = weak.upgrade() {
+                    crate::util::with_dock(&rc, |d| d.mark_class_changed(button_id));
+                }
+            });
+            (xwindow, watch)
+        });
+        if let Some((xwindow, watch)) = watch {
+            self.buttons[index].xwindow = Some(xwindow);
+            self.buttons[index].property_watch = Some(watch);
         }
     }
 
@@ -374,26 +358,13 @@ impl Dock {
             self.insert_button = None;
         }
         if let Some(menu) = self.menu.take() {
-            unsafe {
-                menu.destroy();
-            }
+            ffi_gtk::destroy(&menu);
         }
         let button = &mut self.buttons[index];
-        let filter_ptr = button.filter_data.take();
-        if let Some(xwindow) = button.xwindow.take() {
-            // The filter Box is reconstructed and freed here; after this
-            // point the filter callback can no longer run for this button.
-            if let Some(ptr) = filter_ptr {
-                unsafe {
-                    ffi_x11::gdk_window_remove_filter(
-                        glib::translate::ToGlibPtr::to_glib_none(&xwindow).0,
-                        Some(identity_filter),
-                        ptr as *mut _,
-                    );
-                    drop(Box::from_raw(ptr));
-                }
-            }
-        }
+        // Dropping the watch removes the GDK filter, so the callback can no
+        // longer run for this button; the foreign window goes with it.
+        button.property_watch = None;
+        button.xwindow = None;
         if let Some(window) = button.window.take() {
             self.window_index.remove(&(window.as_ptr() as usize));
             for handler in button.window_handlers.drain(..) {
@@ -609,9 +580,7 @@ impl Dock {
                 b.key = format!("window:{}", b.window_xid());
             }
             if let Some(menu) = self.menu.take() {
-                unsafe {
-                    menu.destroy();
-                }
+                ffi_gtk::destroy(&menu);
             }
         } else {
             self.free_button(button_id);
@@ -704,36 +673,6 @@ pub fn scroll_steps(event: &ScrollInfo, accumulator: Option<&mut f64>) -> i32 {
             steps
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Identity property filter
-// ---------------------------------------------------------------------------
-
-pub struct IdentityFilter {
-    weak: DockWeak,
-    button_id: u64,
-    atoms: [ffi_x11::Atom; 4],
-}
-
-unsafe extern "C" fn identity_filter(
-    xevent: *mut std::os::raw::c_void,
-    _event: *mut gdk::ffi::GdkEvent,
-    data: *mut std::os::raw::c_void,
-) -> std::os::raw::c_int {
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let filter = &*(data as *const IdentityFilter);
-        let event = &*(xevent as *const x11::xlib::XEvent);
-        if event.get_type() == x11::xlib::PropertyNotify
-            && filter.atoms.contains(&event.property.atom)
-        {
-            if let Some(rc) = filter.weak.upgrade() {
-                crate::util::with_dock(&rc, |d| d.mark_class_changed(filter.button_id));
-            }
-        }
-    }));
-    let _ = result;
-    ffi_x11::GDK_FILTER_CONTINUE
 }
 
 // ---------------------------------------------------------------------------
@@ -1128,12 +1067,13 @@ impl Dock {
             let scale = 1.0f64.max(button.icon_scale as f64);
             let x = (width - icon.width() as f64 / scale) / 2.0;
             let y = (height - icon.height() as f64 / scale) / 2.0;
-            cr.save().unwrap();
-            cr.translate(x, y);
-            cr.scale(1.0 / scale, 1.0 / scale);
-            cr.set_source_pixbuf(&icon, 0.0, 0.0);
-            let _ = cr.paint_with_alpha(if min { 0.45 } else { 1.0 });
-            cr.restore().unwrap();
+            if cr.save().is_ok() {
+                cr.translate(x, y);
+                cr.scale(1.0 / scale, 1.0 / scale);
+                cr.set_source_pixbuf(&icon, 0.0, 0.0);
+                let _ = cr.paint_with_alpha(if min { 0.45 } else { 1.0 });
+                let _ = cr.restore();
+            }
         }
         if button.launching {
             let angle =
@@ -1196,12 +1136,7 @@ impl Dock {
             let (tw, th) = layout.pixel_size();
             cr.set_source_rgb(1.0, 1.0, 1.0);
             cr.move_to(9.0 - tw as f64 / 2.0, 9.0 - th as f64 / 2.0);
-            unsafe {
-                pango_cairo_show_layout(
-                    cr.to_raw_none(),
-                    glib::translate::ToGlibPtr::to_glib_none(&layout).0,
-                );
-            }
+            ffi_gtk::show_layout(cr, &layout);
         }
         if self.insert_button == Some(button_id) {
             cr.set_source_rgb(0.25, 0.65, 1.0);

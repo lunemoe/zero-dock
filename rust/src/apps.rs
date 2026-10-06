@@ -6,19 +6,9 @@ use crate::util::{monotonic_us, t};
 use gio::prelude::*;
 use gtk::prelude::*;
 
-/// `g_app_info_get_executable` may return NULL (gio-rs would crash on that),
-/// so read it through FFI and map NULL to an empty string.
+/// `g_app_info_get_executable`, NULL mapped to an empty string.
 pub fn app_executable(app: &gio::DesktopAppInfo) -> String {
-    unsafe {
-        let info =
-            glib::translate::ToGlibPtr::to_glib_none(&app.clone().upcast::<gio::AppInfo>()).0;
-        let exe = gio::ffi::g_app_info_get_executable(info);
-        if exe.is_null() {
-            String::new()
-        } else {
-            std::ffi::CStr::from_ptr(exe).to_string_lossy().into_owned()
-        }
-    }
+    crate::ffi_gtk::app_info_executable(&app.clone().upcast::<gio::AppInfo>())
 }
 
 pub fn app_match_score(app: &gio::DesktopAppInfo, ids: &[String]) -> i32 {
@@ -63,12 +53,35 @@ pub fn app_equal(a: Option<&gio::DesktopAppInfo>, b: Option<&gio::DesktopAppInfo
     match (a.filename(), b.filename()) {
         (Some(pa), Some(pb)) => pa == pb,
         // g_app_info_equal for entries without a file (id + executable).
-        _ => unsafe {
-            let a = glib::translate::ToGlibPtr::to_glib_none(&a.clone().upcast::<gio::AppInfo>()).0;
-            let b = glib::translate::ToGlibPtr::to_glib_none(&b.clone().upcast::<gio::AppInfo>()).0;
-            gio::ffi::g_app_info_equal(a, b) != glib::ffi::GFALSE
-        },
+        _ => {
+            let a = a.clone().upcast::<gio::AppInfo>();
+            let b = b.clone().upcast::<gio::AppInfo>();
+            a.equal(&b)
+        }
     }
+}
+
+/// Identity bonus for a window that appeared while a pin was launching.
+///
+/// A matching startup id is the strongest signal, but it is only *a* signal:
+/// when both ids are present and differ (a stale id on the window, or a
+/// wrapper that never received ours), the process-ancestry probe must still
+/// run. Otherwise the launcher silently loses the very window it started.
+pub(crate) fn launch_probe_score(
+    window_startup: Option<&str>,
+    launcher_startup: Option<&str>,
+    window_pid: i32,
+    launcher_pid: i32,
+) -> i32 {
+    if let (Some(window_id), Some(launcher_id)) = (window_startup, launcher_startup) {
+        if !window_id.is_empty() && window_id == launcher_id {
+            return 220;
+        }
+    }
+    if launcher_pid > 1 && pid_descends(window_pid, launcher_pid) {
+        return 200;
+    }
+    0
 }
 
 /// Exact identity hints: full path, desktop id, basename or flatpak id.
@@ -128,13 +141,12 @@ impl Dock {
                 score = score.max(160);
             }
             if b.launch_until > now {
-                if let (Some(startup), Some(bid)) = (startup.as_deref(), b.startup_id.as_deref()) {
-                    if startup == bid {
-                        score = score.max(220);
-                    }
-                } else if b.launch_pid > 1 && pid_descends(pid, b.launch_pid) {
-                    score = score.max(200);
-                }
+                score = score.max(launch_probe_score(
+                    startup.as_deref(),
+                    b.startup_id.as_deref(),
+                    pid,
+                    b.launch_pid,
+                ));
             }
             if score > high {
                 high = score;

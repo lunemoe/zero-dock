@@ -86,13 +86,19 @@ impl Dock {
         event: Option<&gdk::Event>,
     ) {
         menu.show_all();
-        if let (Some(plugin), Some(event)) = (&self.plugin, event) {
-            plugin.popup_menu(menu, anchor, Some(event));
-        } else {
-            // gtk_menu_popup_at_widget(NULL event) still emits
-            // "no trigger event for menu popup" on GTK 3. Use the legacy
-            // keyboard/programmatic popup form for event-less activation.
-            menu.popup_easy(0, self.timestamp());
+        match (&self.plugin, event) {
+            (Some(plugin), Some(event)) => plugin.popup_menu(menu, anchor, Some(event)),
+            // No plugin (X11-less fallback) or no GDK event: gtk_menu_popup_at_*
+            // with a NULL event emits "no trigger event for menu popup" on
+            // GTK 3, so use the legacy popup form. Register the menu explicitly
+            // first: that is what keeps the panel from auto-hiding while the
+            // menu is up.
+            _ => {
+                if let Some(plugin) = &self.plugin {
+                    plugin.register_menu(menu);
+                }
+                menu.popup_easy(0, self.timestamp());
+            }
         }
     }
 

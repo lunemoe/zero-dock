@@ -7,6 +7,11 @@
 //! `Drop`) and cast down to the raw pointers the C functions expect. That
 //! keeps every window/workspace handle memory-safe without writing a custom
 //! ref-count wrapper.
+//!
+//! This is one of the four modules allowed to contain `unsafe` (see the crate
+//! root).
+
+#![allow(unsafe_code)]
 
 use glib::ffi::gboolean;
 use glib::gobject_ffi::GObject;
@@ -50,6 +55,7 @@ extern "C" {
         plugin: *mut GObject,
         item: *mut gtk::ffi::GtkMenuItem,
     );
+    pub fn xfce_panel_plugin_register_menu(plugin: *mut GObject, menu: *mut gtk::ffi::GtkMenu);
     pub fn xfce_panel_plugin_save_location(plugin: *mut GObject, create: gboolean) -> *mut c_char;
     pub fn xfce_panel_plugin_get_arguments(plugin: *mut GObject) -> *mut *mut c_char;
     pub fn xfce_panel_plugin_block_autohide(plugin: *mut GObject, blocked: gboolean);
@@ -94,6 +100,12 @@ impl XfcePanelPlugin {
     }
     pub fn menu_insert_item(&self, item: &impl glib::IsA<gtk::MenuItem>) {
         unsafe { xfce_panel_plugin_menu_insert_item(self.ptr(), item.as_ref().to_glib_none().0) }
+    }
+    /// Tell the panel a menu opened, so it locks autohide/unhide for as long as
+    /// the menu lives (`xfce_panel_plugin_popup_menu` does this itself, but the
+    /// GTK-anchored path used for event-less popups does not).
+    pub fn register_menu(&self, menu: &impl glib::IsA<gtk::Menu>) {
+        unsafe { xfce_panel_plugin_register_menu(self.ptr(), menu.as_ref().to_glib_none().0) }
     }
     /// Returns the save location (transfer full) as an owned string.
     pub fn save_location(&self, create: bool) -> Option<String> {
@@ -308,7 +320,7 @@ impl Screen {
         unsafe {
             let list = xfw_screen_get_windows(self.p());
 
-            crate::util::glist_borrow_objects(list)
+            crate::ffi_glib::glist_borrow_objects(list)
         }
     }
     pub fn active_window(&self) -> Option<glib::Object> {
@@ -329,6 +341,14 @@ impl Screen {
     }
     pub fn workspace_manager(&self) -> glib::Object {
         unsafe { xfw_object(xfw_screen_get_workspace_manager(self.p())) }
+    }
+    /// Workspaces on this screen.
+    pub fn workspaces(&self) -> Vec<glib::Object> {
+        workspace_list(&self.workspace_manager())
+    }
+    /// Workspace groups on this screen.
+    pub fn workspace_groups(&self) -> Vec<glib::Object> {
+        workspace_group_list(&self.workspace_manager())
     }
 }
 
@@ -525,6 +545,24 @@ impl Workspace {
             xfw_workspace_activate(ws.to_glib_none().0, &mut err);
             report_error("activate workspace", err);
         }
+    }
+}
+
+/// Workspace list of a screen (transfer-none `GList`, borrowed for the call).
+pub fn workspace_list(manager: &glib::Object) -> Vec<glib::Object> {
+    unsafe {
+        crate::ffi_glib::glist_borrow_objects(xfw_workspace_manager_list_workspaces(
+            manager.to_glib_none().0,
+        ))
+    }
+}
+
+/// Workspace-group list of a manager (transfer-none `GList`).
+pub fn workspace_group_list(manager: &glib::Object) -> Vec<glib::Object> {
+    unsafe {
+        crate::ffi_glib::glist_borrow_objects(xfw_workspace_manager_list_workspace_groups(
+            manager.to_glib_none().0,
+        ))
     }
 }
 

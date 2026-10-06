@@ -2,6 +2,7 @@
 //! import/export. Ported from `src/settings.c`.
 
 use crate::dock::Dock;
+use crate::ffi_gtk;
 use crate::util::{real_time_us, t};
 use glib::KeyFile;
 use gtk::prelude::*;
@@ -115,9 +116,7 @@ impl Dock {
 
     pub fn show_error(&mut self, message: &str) {
         if let Some(old) = self.error_dialog.take() {
-            unsafe {
-                old.destroy();
-            }
+            ffi_gtk::destroy(&old);
         }
         let parent = self
             .settings_dialog
@@ -158,9 +157,7 @@ impl Dock {
                         }
                     });
                 }
-                unsafe {
-                    dlg.destroy();
-                }
+                ffi_gtk::destroy(dlg);
             });
         }
         dialog.show();
@@ -289,9 +286,7 @@ impl Dock {
 
         self.hide_preview();
         if let Some(menu) = self.menu.take() {
-            unsafe {
-                menu.destroy();
-            }
+            ffi_gtk::destroy(&menu);
         }
         // Running pinned buttons become ordinary live buttons temporarily.
         let mut i = 0;
@@ -341,20 +336,7 @@ pub fn valid_key(key: &str) -> bool {
 /// Serialize the pinned-launcher list into a key file (shared by `Dock::save`
 /// and the unit tests so the real serialization is what gets tested).
 pub fn write_pins_to_keyfile(file: &KeyFile, pins: &[String]) {
-    let cstrings: Vec<std::ffi::CString> = pins
-        .iter()
-        .map(|p| std::ffi::CString::new(p.as_str()).unwrap_or_default())
-        .collect();
-    let ptrs: Vec<*const std::os::raw::c_char> = cstrings.iter().map(|c| c.as_ptr()).collect();
-    unsafe {
-        glib::ffi::g_key_file_set_string_list(
-            glib::translate::ToGlibPtr::to_glib_none(file).0,
-            c"Dock".as_ptr() as *const _,
-            c"Pinned".as_ptr() as *const _,
-            ptrs.as_ptr(),
-            ptrs.len(),
-        );
-    }
+    ffi_gtk::key_file_set_string_list(file, "Dock", "Pinned", pins);
 }
 
 /// Write `contents` atomically with 0600 permissions (replacement for
@@ -644,9 +626,7 @@ impl Dock {
         {
             let weak = self.weak();
             dialog.connect_response(move |dlg, _| {
-                unsafe {
-                    dlg.destroy();
-                }
+                ffi_gtk::destroy(dlg);
                 let _ = &weak;
             });
         }
@@ -665,7 +645,9 @@ impl Dock {
     }
 
     fn monitor_area(&self) -> gdk::Rectangle {
-        let display = gdk::Display::default().unwrap();
+        let Some(display) = gdk::Display::default() else {
+            return gdk::Rectangle::new(0, 0, 1024, 768);
+        };
         let plugin_widget: Option<gtk::Widget> = self
             .plugin
             .as_ref()
@@ -693,9 +675,7 @@ impl Dock {
         self.save();
         self.refresh();
         if let Some(dialog) = self.settings_dialog.take() {
-            unsafe {
-                dialog.destroy();
-            }
+            ffi_gtk::destroy(&dialog);
         }
         self.configure();
     }
@@ -737,9 +717,7 @@ impl Dock {
                     }
                 }
             }
-            unsafe {
-                dlg.destroy();
-            }
+            ffi_gtk::destroy(dlg);
         });
         dialog.show();
     }
@@ -808,16 +786,12 @@ impl Dock {
                     }
                 }
             }
-            unsafe {
-                dlg.destroy();
-            }
+            ffi_gtk::destroy(dlg);
             if restored {
                 if let Some(rc) = weak.upgrade() {
                     crate::util::with_dock(&rc, |d| {
                         if let Some(s) = d.settings_dialog.take() {
-                            unsafe {
-                                s.destroy();
-                            }
+                            ffi_gtk::destroy(&s);
                         }
                         d.configure();
                     });

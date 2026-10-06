@@ -96,14 +96,16 @@ impl Timer {
     }
 
     /// Remove the source immediately if it is still live.
+    ///
+    /// `SourceId` is not invalidatable on its own, so removal goes through a
+    /// helper that treats an already-destroyed source as a no-op instead of
+    /// emitting a GLib critical.
     pub fn clear(&mut self) {
         let id = self.id.take();
         let live = self.live.take();
         if let (Some(id), Some(live)) = (id, live) {
             if live.replace(false) {
-                unsafe {
-                    glib::ffi::g_source_remove(id.as_raw());
-                }
+                crate::ffi_glib::remove_source_id(id);
             }
         }
     }
@@ -126,22 +128,4 @@ pub type DockWeak = std::rc::Weak<RefCell<crate::dock::Dock>>;
 pub fn with_dock<T>(rc: &DockRef, f: impl FnOnce(&mut crate::dock::Dock) -> T) -> Option<T> {
     let mut borrow = rc.try_borrow_mut().ok()?;
     Some(f(&mut borrow))
-}
-
-/// Iterate a transfer-none `GList` of GObjects without taking ownership of
-/// the list or its items. The caller keeps the list lifetime rules of the
-/// underlying API.
-pub unsafe fn glist_borrow_objects(list: *mut glib::ffi::GList) -> Vec<glib::Object> {
-    // Transfer-none container: ref each item (released on drop); the list
-    // nodes themselves stay owned by the source object.
-    let mut out = Vec::new();
-    let mut node = list;
-    while !node.is_null() {
-        let data = (*node).data as *mut glib::gobject_ffi::GObject;
-        if !data.is_null() {
-            out.push(glib::translate::FromGlibPtrNone::from_glib_none(data));
-        }
-        node = (*node).next;
-    }
-    out
 }

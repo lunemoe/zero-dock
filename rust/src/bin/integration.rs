@@ -3,6 +3,12 @@
 //! Built only with the `test-harness` feature. The runner intentionally uses
 //! real GTK windows, libxfce4windowing, X11 properties, the production Dock
 //! implementation and (optionally) the real XFCE external wrapper/PulseAudio.
+//!
+//! Raw `unsafe` here is confined to the `raw` helper module and to the two
+//! places that must construct a real `XfcePanelPlugin` through the C ABI: a
+//! test harness has to play the part of a foreign process and of a pointer
+//! device, which no safe binding can express. The shipped plugin library
+//! itself contains no `unsafe` outside its FFI modules.
 
 use gio::prelude::*;
 use glib::gobject_ffi::GObject;
@@ -41,6 +47,122 @@ extern "C" {
         ...
     ) -> *mut GObject;
     fn g_object_set_data(object: *mut GObject, key: *const c_char, data: *mut std::ffi::c_void);
+}
+
+// ---------------------------------------------------------------------------
+// Test-only raw X11 / libc helpers
+// ---------------------------------------------------------------------------
+//
+// The harness plays the part of a *foreign application* and a *user with a
+// pointer*: it must set WM_CLASS properties directly and inject real pointer
+// events, which no safe binding offers. Every raw call is collected in this one
+// module; the scenarios above use these safe wrappers only.
+mod raw {
+    #![allow(unsafe_code)]
+
+    use super::*;
+
+    /// `XSetClassHint` + flush on the fixture's X window.
+    pub fn set_class_hint(xid: u64, instance: &str, class: &str) {
+        let display = test_api::xdisplay();
+        let name = CString::new(instance).unwrap();
+        let class = CString::new(class).unwrap();
+        let mut hint = xlib::XClassHint {
+            res_name: name.as_ptr() as *mut c_char,
+            res_class: class.as_ptr() as *mut c_char,
+        };
+        unsafe {
+            xlib::XSetClassHint(display, xid, &mut hint);
+            xlib::XFlush(display);
+        }
+    }
+
+    /// Set or delete a UTF8_STRING window property.
+    pub fn set_utf8_property(xid: u64, property: &str, value: Option<&str>) {
+        let display = test_api::xdisplay();
+        let prop = CString::new(property).unwrap();
+        let utf8_name = CString::new("UTF8_STRING").unwrap();
+        unsafe {
+            let prop = xlib::XInternAtom(display, prop.as_ptr(), xlib::False);
+            if let Some(value) = value {
+                let utf8 = xlib::XInternAtom(display, utf8_name.as_ptr(), xlib::False);
+                xlib::XChangeProperty(
+                    display,
+                    xid,
+                    prop,
+                    utf8,
+                    8,
+                    xlib::PropModeReplace,
+                    value.as_bytes().as_ptr(),
+                    value.len() as c_int,
+                );
+            } else {
+                xlib::XDeleteProperty(display, xid, prop);
+            }
+            xlib::XFlush(display);
+        }
+    }
+
+    /// Move the pointer with XTest.
+    pub fn move_pointer(x: i32, y: i32) {
+        unsafe {
+            xtest::XTestFakeMotionEvent(test_api::xdisplay(), -1, x, y, 0);
+            xlib::XFlush(test_api::xdisplay());
+        }
+    }
+
+    /// Press and release one pointer button with XTest.
+    pub fn click_pointer(button: u32) {
+        unsafe {
+            xtest::XTestFakeButtonEvent(test_api::xdisplay(), button, 1, 0);
+            xtest::XTestFakeButtonEvent(test_api::xdisplay(), button, 0, 0);
+            xlib::XFlush(test_api::xdisplay());
+        }
+    }
+
+    /// Press button 1, glide to (`tx`, `ty`) in steps, release.
+    pub fn drag_pointer(from: (i32, i32), to: (i32, i32)) {
+        unsafe {
+            let display = test_api::xdisplay();
+            xtest::XTestFakeMotionEvent(display, -1, from.0, from.1, 0);
+            xlib::XFlush(display);
+            xtest::XTestFakeButtonEvent(display, 1, 1, 0);
+            xlib::XFlush(display);
+            for step in 1..=12 {
+                let x = from.0 + (to.0 - from.0) * step / 12;
+                let y = from.1 + (to.1 - from.1) * step / 12;
+                xtest::XTestFakeMotionEvent(display, -1, x, y, 0);
+                xlib::XFlush(display);
+                pump(15);
+            }
+            xtest::XTestFakeButtonEvent(display, 1, 0, 0);
+            xlib::XFlush(display);
+        }
+    }
+
+    /// Send a signal to another process (test fixtures only).
+    pub fn terminate(pid: i32) {
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+    }
+
+    /// This process's consumed CPU time in microseconds.
+    pub fn cpu_micros() -> u64 {
+        unsafe {
+            let mut usage: libc::rusage = std::mem::zeroed();
+            if libc::getrusage(libc::RUSAGE_SELF, &mut usage) != 0 {
+                return 0;
+            }
+            ((usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) as u64) * 1_000_000
+                + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) as u64
+        }
+    }
+
+    /// Live refcount of a raw GObject (leak/over-release probes).
+    pub fn ref_count(object: *mut GObject) -> u32 {
+        unsafe { (*object).ref_count }
+    }
 }
 
 static NEXT_ID: AtomicU32 = AtomicU32::new(12000);
@@ -93,43 +215,12 @@ fn set_wm_class(window: &gtk::Window, class: &str) {
         panic!("fixture must be realized before WM_CLASS");
     };
     let xid = test_api::gdk_xid(&gdk_window);
-    let display = test_api::xdisplay();
-    let name = CString::new("zero-dock-fixture").unwrap();
-    let class = CString::new(class).unwrap();
-    let mut hint = xlib::XClassHint {
-        res_name: name.as_ptr() as *mut c_char,
-        res_class: class.as_ptr() as *mut c_char,
-    };
-    unsafe {
-        xlib::XSetClassHint(display, xid, &mut hint);
-        xlib::XFlush(display);
-    }
+    raw::set_class_hint(xid, "zero-dock-fixture", class);
 }
 
 fn set_utf8_property(window: &gtk::Window, property: &str, value: Option<&str>) {
     let xid = test_api::gdk_xid(&window.window().expect("realized fixture"));
-    let display = test_api::xdisplay();
-    let prop = CString::new(property).unwrap();
-    let utf8 = CString::new("UTF8_STRING").unwrap();
-    unsafe {
-        let prop = xlib::XInternAtom(display, prop.as_ptr(), xlib::False);
-        if let Some(value) = value {
-            let utf8 = xlib::XInternAtom(display, utf8.as_ptr(), xlib::False);
-            xlib::XChangeProperty(
-                display,
-                xid,
-                prop,
-                utf8,
-                8,
-                xlib::PropModeReplace,
-                value.as_bytes().as_ptr(),
-                value.len() as c_int,
-            );
-        } else {
-            xlib::XDeleteProperty(display, xid, prop);
-        }
-        xlib::XFlush(display);
-    }
+    raw::set_utf8_property(xid, property, value);
 }
 
 fn fixture(title: &str, class: &str) -> gtk::Window {
@@ -176,25 +267,15 @@ fn widget_center(widget: &impl IsA<gtk::Widget>) -> (i32, i32) {
 /// Move the pointer over a widget without clicking (C harness `mouse_at`).
 fn hover_widget(widget: &impl IsA<gtk::Widget>) {
     let (x, y) = widget_center(widget);
-    unsafe {
-        xtest::XTestFakeMotionEvent(test_api::xdisplay(), -1, x, y, 0);
-        xlib::XFlush(test_api::xdisplay());
-    }
+    raw::move_pointer(x, y);
     pump(120);
 }
 
 fn click_widget(widget: &impl IsA<gtk::Widget>, button: u32) {
     let (x, y) = widget_center(widget);
-    unsafe {
-        xtest::XTestFakeMotionEvent(test_api::xdisplay(), -1, x, y, 0);
-        xlib::XFlush(test_api::xdisplay());
-    }
+    raw::move_pointer(x, y);
     pump(120);
-    unsafe {
-        xtest::XTestFakeButtonEvent(test_api::xdisplay(), button, 1, 0);
-        xtest::XTestFakeButtonEvent(test_api::xdisplay(), button, 0, 0);
-        xlib::XFlush(test_api::xdisplay());
-    }
+    raw::click_pointer(button);
     pump(120);
 }
 
@@ -215,22 +296,7 @@ fn drag_between(source: &impl IsA<gtk::Widget>, target: &impl IsA<gtk::Widget>, 
             allocation.height() / 4
         };
     }
-    unsafe {
-        let display = test_api::xdisplay();
-        xtest::XTestFakeMotionEvent(display, -1, sx, sy, 0);
-        xlib::XFlush(display);
-        xtest::XTestFakeButtonEvent(display, 1, 1, 0);
-        xlib::XFlush(display);
-        for step in 1..=12 {
-            let x = sx + (tx - sx) * step / 12;
-            let y = sy + (ty - sy) * step / 12;
-            xtest::XTestFakeMotionEvent(display, -1, x, y, 0);
-            xlib::XFlush(display);
-            pump(15);
-        }
-        xtest::XTestFakeButtonEvent(display, 1, 0, 0);
-        xlib::XFlush(display);
-    }
+    raw::drag_pointer((sx, sy), (tx, ty));
     pump(220);
 }
 
@@ -321,9 +387,7 @@ impl Host {
             raw_plugin: _,
             _rc_c,
         } = self;
-        unsafe {
-            window.destroy();
-        }
+        zero_dock::test_api::destroy_widget(&window);
         pump(120);
         // Production teardown is driven by the plugin object's free-data /
         // object-data destroy path. Keep this assertion in the integration
@@ -550,7 +614,7 @@ fn scenario_native_all() -> TestResult {
             "window menu should open"
         );
         if let Some(menu) = d.menu.take() {
-            unsafe { menu.destroy() };
+            zero_dock::test_api::destroy_widget(&menu);
         }
     }
 
@@ -1079,13 +1143,13 @@ fn scenario_improvements() -> TestResult {
         // Opening the preferences dialog borrows the plugin widget to place
         // it; that must not steal a reference to the plugin object itself.
         let plugin = host.raw_plugin;
-        let before = unsafe { (*plugin).ref_count };
+        let before = raw::ref_count(plugin);
         {
             let mut d = host.dock.borrow_mut();
             d.configure();
             check!(d.settings_dialog.is_some(), "settings dialog must open");
         }
-        let after_open = unsafe { (*plugin).ref_count };
+        let after_open = raw::ref_count(plugin);
         check!(
             after_open == before,
             "configure() must not change the plugin refcount"
@@ -1096,7 +1160,7 @@ fn scenario_improvements() -> TestResult {
             .settings_dialog
             .take()
             .expect("settings dialog still open");
-        unsafe { dialog.destroy() };
+        zero_dock::test_api::destroy_widget(&dialog);
     }
     pump(100);
     let mut pin = host
@@ -1316,14 +1380,7 @@ fn resident_kib() -> u64 {
 }
 
 fn cpu_micros() -> u64 {
-    unsafe {
-        let mut usage: libc::rusage = std::mem::zeroed();
-        if libc::getrusage(libc::RUSAGE_SELF, &mut usage) != 0 {
-            return 0;
-        }
-        ((usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) as u64) * 1_000_000
-            + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) as u64
-    }
+    raw::cpu_micros()
 }
 
 fn scenario_stress() -> TestResult {
@@ -1562,9 +1619,7 @@ fn scenario_audio_recovery() -> TestResult {
         "volume bubble should auto-hide"
     );
 
-    unsafe {
-        libc::kill(pulse_pid, libc::SIGTERM);
-    }
+    raw::terminate(pulse_pid);
     pump(800);
     check!(
         !host.dock.borrow_mut().audio_status(id).present,
@@ -1681,12 +1736,8 @@ fn scenario_external_wrappers() -> TestResult {
 
     // Exercise a real XTest pointer move/click inside one embedded wrapper.
     let (ox, oy) = s1.window().expect("socket window").root_origin();
-    unsafe {
-        xtest::XTestFakeMotionEvent(test_api::xdisplay(), -1, ox + 30, oy + 24, 0);
-        xtest::XTestFakeButtonEvent(test_api::xdisplay(), 1, 1, 0);
-        xtest::XTestFakeButtonEvent(test_api::xdisplay(), 1, 0, 0);
-        xlib::XFlush(test_api::xdisplay());
-    }
+    raw::move_pointer(ox + 30, oy + 24);
+    raw::click_pointer(1);
     pump(150);
 
     let _ = one.kill();
@@ -2030,7 +2081,7 @@ fn scenario_xi_probe() -> TestResult {
         ];
         check!(
             xinput2::XISelectEvents(display, root, masks.as_mut_ptr(), masks.len() as c_int) as i32
-                == 0 as i32,
+                == 0_i32,
             "probe: XISelectEvents failed"
         );
         xlib::XFlush(display);

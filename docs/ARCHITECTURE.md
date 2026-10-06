@@ -19,8 +19,10 @@ Zero Dock is a GTK 3 shared module loaded by XFCE's external `wrapper-2.0` provi
 | `rust/src/audio.rs` | PulseAudio subscriptions, process matching, mute and volume |
 | `rust/src/input.rs` | Separate XInput2 connection, device scroll increments and speaker hit testing |
 | `rust/src/ffi_xfce.rs` | Hand-written FFI for libxfce4panel / libxfce4windowing (no Rust bindings exist upstream) |
-| `rust/src/ffi_x11.rs` | Xlib / XComposite / XInput2 / GDK-X11 glue and error traps |
-| `rust/src/util.rs` | RAII timers (`Timer`), gettext helper, `GList` iteration |
+| `rust/src/ffi_x11.rs` | Xlib / XComposite / XInput2 / GDK-X11 glue, error traps, composite frame capture |
+| `rust/src/ffi_glib.rs` | GLib callbacks and borrowed `GList` iteration |
+| `rust/src/ffi_gtk.rs` | GTK/GDK/GIO helpers the bindings omit (widget destroy, pango-cairo text, key-file string lists, GObject data) |
+| `rust/src/util.rs` | RAII timers (`Timer`), gettext helper |
 | `rust/src/bin/test_host.rs` | Standalone GUI test host (former `tests/host.c`), linked against the same rlib |
 
 ## Ownership model
@@ -29,7 +31,7 @@ The module entry point builds the `XfcePanelPlugin` widget with `g_object_new` (
 
 The PulseAudio state machine lives in its own `Rc<RefCell<Audio>>` inside the dock, with a generation counter bumped on every reconnect so callbacks from a replaced connection can never mutate the new connection's buffers. Re-entrant borrows defer through an idle callback instead of aborting.
 
-`unsafe` is confined to the `plugin_abi` module, the `ffi_*` modules and the XComposite capture path; all business logic is safe Rust. X11 calls that can raise asynchronous errors run inside GDK error traps exactly like the C implementation did.
+`unsafe` is confined to five modules: `plugin_abi` (the panel module ABI itself) and the four `ffi_*` bindings modules (`ffi_xfce`, `ffi_x11`, `ffi_glib`, `ffi_gtk`). The crate root carries `#![deny(unsafe_code)]`, so every other module — the whole lifecycle, button, menu, preview, audio, settings and input logic — is verified safe Rust at compile time rather than by convention. Each FFI module exposes a safe surface: callers get owned `glib::Object` handles, RAII guards (`Timer`, `PropertyWatch`, `XInputConnection`) and plain data, never raw pointers. X11 calls that can raise asynchronous errors run inside GDK error traps exactly like the C implementation did, and the GDK property filter and other C callbacks catch unwinds so a bug can never unwind into C.
 
 ## Behavior notes (unchanged from the C implementation)
 

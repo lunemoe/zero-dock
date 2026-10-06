@@ -6,6 +6,7 @@
 //! fuzzy names.
 
 use crate::dock::Dock;
+use crate::ffi_gtk;
 use crate::settings::{is_absolute_desktop_path, valid_key};
 use crate::util::t;
 use glib::KeyFile;
@@ -103,9 +104,7 @@ impl Dock {
             return;
         };
         if let Some(old) = self.association_dialog.take() {
-            unsafe {
-                old.destroy();
-            }
+            ffi_gtk::destroy(&old);
         }
         let dialog = gtk::FileChooserDialog::with_buttons(
             Some(&t("选择关联应用的桌面文件")),
@@ -155,9 +154,7 @@ impl Dock {
                         });
                     }
                 }
-                unsafe {
-                    dlg.destroy();
-                }
+                ffi_gtk::destroy(dlg);
             });
         }
         {

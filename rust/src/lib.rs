@@ -2,14 +2,27 @@
 //!
 //! There is no C code: the XFCE panel module ABI (`xfce_panel_module_construct`)
 //! is exported directly from this crate's cdylib (see `plugin_abi.rs`), and
-//! `unsafe` is confined to that module, the `ffi_*` modules and the XComposite
-//! capture path. All business logic is safe Rust.
+//! `unsafe` is confined to four modules:
+//!
+//! * [`ffi_xfce`] — libxfce4panel / libxfce4windowing bindings,
+//! * [`ffi_x11`] — Xlib / XComposite / XInput2 and the GDK X11 glue,
+//! * [`ffi_glib`] — GLib callbacks and borrowed `GList` walks,
+//! * [`ffi_gtk`] — the GTK/GDK/GIO helpers the bindings omit,
+//!
+//! plus the [`plugin_abi`] module that implements the panel module ABI itself.
+//! `#![deny(unsafe_code)]` below makes that a compile-time guarantee rather
+//! than a comment: everything else in the crate is safe Rust, and the unsafe
+//! modules hand out safe wrappers.
+
+#![deny(unsafe_code)]
 
 mod apps;
 mod associations;
 mod audio;
 mod button;
 mod dock;
+mod ffi_glib;
+mod ffi_gtk;
 mod ffi_x11;
 mod ffi_xfce;
 mod input;
@@ -26,6 +39,7 @@ mod util;
 /// # Safety
 /// `plugin` must point to a valid `XfcePanelPlugin` GObject on the GTK main
 /// thread; the pointer is borrowed for the duration of the call.
+#[allow(unsafe_code)]
 pub unsafe fn construct_plugin(plugin: *mut glib::gobject_ffi::GObject) {
     plugin_abi::construct_plugin(plugin)
 }
@@ -44,6 +58,7 @@ pub mod test_api {
     ///
     /// # Safety
     /// plugin must be a live XfcePanelPlugin on the GTK main thread.
+    #[allow(unsafe_code)]
     pub unsafe fn construct(plugin: *mut glib::gobject_ffi::GObject) -> Option<DockRef> {
         crate::dock::construct(crate::ffi_xfce::XfcePanelPlugin(plugin))
     }
@@ -55,15 +70,13 @@ pub mod test_api {
             .map(|button| button.id)
     }
 
+    /// Destroy a widget the scenario is holding; see [`crate::ffi_gtk::destroy`].
+    pub fn destroy_widget(widget: &impl glib::prelude::IsA<gtk::Widget>) {
+        crate::ffi_gtk::destroy(widget)
+    }
+
     pub fn workspaces(screen: &Screen) -> Vec<glib::Object> {
-        let manager = screen.workspace_manager();
-        unsafe {
-            crate::util::glist_borrow_objects(
-                crate::ffi_xfce::xfw_workspace_manager_list_workspaces(
-                    glib::translate::ToGlibPtr::to_glib_none(&manager).0,
-                ),
-            )
-        }
+        screen.workspaces()
     }
 
     pub fn association_key(window: &glib::Object) -> Option<String> {
@@ -75,13 +88,7 @@ pub mod test_api {
     }
 
     pub fn gdk_xid(window: &gdk::Window) -> u64 {
-        extern "C" {
-            fn gdk_x11_window_get_xid(window: *mut gdk::ffi::GdkWindow) -> std::os::raw::c_ulong;
-        }
-        unsafe {
-            use glib::translate::ToGlibPtr;
-            gdk_x11_window_get_xid(window.to_glib_none().0) as u64
-        }
+        crate::ffi_x11::window_xid(window)
     }
 }
 

@@ -9,6 +9,11 @@
 //! ```
 //!
 //! With no arguments a private rc file is created and removed on exit.
+//!
+//! The host's whole job is to build a real `XfcePanelPlugin` through the C ABI
+//! and hand it to the plugin, so the raw calls below are the test fixture
+//! itself. The shipped plugin library keeps its `unsafe` inside its FFI
+//! modules.
 
 use glib::ffi::GType;
 use glib::gobject_ffi::GObject;

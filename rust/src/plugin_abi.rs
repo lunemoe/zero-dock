@@ -8,7 +8,11 @@
 //! empty. The construct path hands us the plugin object and defers our setup
 //! until the widget is realized — exactly what the C
 //! `XFCE_PANEL_PLUGIN_REGISTER` macro did.
+//!
+//! This module is the ABI boundary itself, so it is one of the places allowed
+//! to contain `unsafe` (see the crate root).
 
+#![allow(unsafe_code)]
 #![allow(clippy::missing_safety_doc)]
 
 use crate::ffi_xfce::XfcePanelPlugin;

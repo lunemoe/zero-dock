@@ -6,6 +6,7 @@
 //! C code's "resolve keys against the current instance" rule.
 
 use crate::dock::Dock;
+use crate::ffi_gtk;
 use crate::util::t;
 use gtk::prelude::*;
 
@@ -96,9 +97,7 @@ impl Dock {
 
     pub(crate) fn new_menu(&mut self) -> gtk::Menu {
         if let Some(old) = self.menu.take() {
-            unsafe {
-                old.destroy();
-            }
+            ffi_gtk::destroy(&old);
         }
         let menu = gtk::Menu::new();
         self.menu = Some(menu.clone());
@@ -114,9 +113,7 @@ impl Dock {
                 }
             });
         }
-        menu.connect_selection_done(|m| unsafe {
-            m.destroy();
-        });
+        menu.connect_selection_done(ffi_gtk::destroy);
         menu
     }
 
@@ -287,13 +284,7 @@ impl Dock {
         ));
         menu.append(&move_item);
         if let Some(screen) = self.screen.as_ref() {
-            let manager = screen.workspace_manager();
-            let workspaces = unsafe {
-                crate::ffi_xfce::xfw_workspace_manager_list_workspaces(
-                    glib::translate::ToGlibPtr::to_glib_none(&manager).0,
-                )
-            };
-            let workspaces = unsafe { crate::util::glist_borrow_objects(workspaces) };
+            let workspaces = screen.workspaces();
             for ws in &workspaces {
                 let name = crate::ffi_xfce::Workspace::name(ws)
                     .filter(|n| !n.is_empty())

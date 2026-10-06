@@ -1,8 +1,12 @@
 //! XComposite capture, frame cache, clickable previews and volume bubbles.
 //! Ported from `src/preview.c`.
+//!
+//! Capture itself lives in [`crate::ffi_x11`]; this module owns the frame cache
+//! and the two popup windows, so it stays safe Rust.
 
 use crate::button::ScrollInfo;
 use crate::dock::Dock;
+use crate::ffi_gtk;
 use crate::ffi_x11;
 use crate::ffi_xfce;
 use crate::util::{monotonic_us, t};
@@ -14,7 +18,9 @@ const FRAME_BUDGET_BYTES: usize = 32 * 1024 * 1024;
 /// Workarea of the monitor under a button, with the C code's fallbacks.
 pub fn monitor_bounds(d: &Dock, button_id: u64) -> gdk::Rectangle {
     let mut bounds = gdk::Rectangle::new(0, 0, 1024, 768);
-    let display = gdk::Display::default().unwrap();
+    let Some(display) = gdk::Display::default() else {
+        return bounds;
+    };
     let mut monitor: Option<gdk::Monitor> = None;
     let Some(button) = d.button(button_id) else {
         return bounds;
@@ -84,8 +90,13 @@ impl Dock {
                 .map(|w| (w.clone(), ffi_xfce::Window::new(w).is_minimized()))
         })?;
         if !minimized {
-            let result = self.capture_live(button_id, &window);
-            if let Some(pixbuf) = result {
+            let client = ffi_xfce::Window::new(&window).xid();
+            // The display's workarea bounds the thumbnail so a capture never
+            // allocates more than the preview can show.
+            let bounds = monitor_bounds(self, button_id);
+            let max_width = (self.settings.preview_width as i32).min((bounds.width() - 48).max(1));
+            let max_height = 1.max(400.min(bounds.height() - 160));
+            if let Some(pixbuf) = ffi_x11::capture_frame(client, max_width, max_height) {
                 if let Some(b) = self.button_mut(button_id) {
                     b.thumbnail = Some(pixbuf);
                     b.thumbnail_time = monotonic_us();
@@ -95,89 +106,6 @@ impl Dock {
         }
         self.button(button_id).and_then(|b| b.thumbnail.clone())
     }
-
-    fn capture_live(
-        &mut self,
-        button_id: u64,
-        window: &glib::Object,
-    ) -> Option<gdk_pixbuf::Pixbuf> {
-        unsafe {
-            let x = ffi_x11::xdisplay();
-            let client = ffi_xfce::Window::new(window).xid();
-
-            ffi_x11::error_trap_push();
-            let target = ffi_x11::frame_target(client);
-            let Some(attr) = ffi_x11::get_window_attributes(x, target) else {
-                ffi_x11::error_trap_pop_ignored();
-                return None;
-            };
-            if !attr.viewable || attr.width <= 0 || attr.height <= 0 {
-                ffi_x11::error_trap_pop_ignored();
-                return None;
-            }
-            let pix = ffi_x11::XCompositeNameWindowPixmap(x, target);
-            x11::xlib::XSync(x, x11::xlib::False);
-            if pix == 0 || ffi_x11::error_trap_pop() {
-                if pix != 0 {
-                    ffi_x11::free_pixmap(pix);
-                }
-                return None;
-            }
-
-            // Compute the bounded thumbnail size (aspect preserved).
-            let bounds = monitor_bounds(self, button_id);
-            let preview_width = self.settings.preview_width;
-            let mut width = (preview_width as i32).min((bounds.width() - 48).max(1));
-            let mut height =
-                1.max(((attr.height as f64) * width as f64 / attr.width as f64).round() as i32);
-            let max_height = 1.max(400.min(bounds.height() - 160));
-            if height > max_height {
-                width = 1.max((width as f64 * max_height as f64 / height as f64).round() as i32);
-                height = max_height;
-            }
-
-            ffi_x11::error_trap_push();
-            let result = render_scaled(x, pix, attr.visual, attr.width, attr.height, width, height);
-            x11::xlib::XSync(x, x11::xlib::False);
-            x11::xlib::XFreePixmap(x, pix);
-            if ffi_x11::error_trap_pop() {
-                return None;
-            }
-            result
-        }
-    }
-}
-
-unsafe fn render_scaled(
-    x: *mut ffi_x11::Display,
-    pix: x11::xlib::Pixmap,
-    visual: *mut x11::xlib::Visual,
-    src_w: i32,
-    src_h: i32,
-    dst_w: i32,
-    dst_h: i32,
-) -> Option<gdk_pixbuf::Pixbuf> {
-    let src =
-        ffi_x11::cairo_xlib_surface_create(x, pix as std::os::raw::c_ulong, visual, src_w, src_h);
-    if src.is_null() {
-        return None;
-    }
-    // from_raw_full takes ownership of the reference returned by
-    // cairo_xlib_surface_create; from_raw_none adds a second one and leaks
-    // the surface on every capture.
-    let src = cairo::Surface::from_raw_full(src).ok()?;
-    let dst = cairo::ImageSurface::create(cairo::Format::ARgb32, dst_w, dst_h).ok()?;
-    let cr = cairo::Context::new(&dst).ok()?;
-    cr.scale(dst_w as f64 / src_w as f64, dst_h as f64 / src_h as f64);
-    let pattern = cairo::SurfacePattern::create(&src);
-    pattern.set_filter(cairo::Filter::Bilinear);
-    let _ = cr.set_source(&pattern);
-    let _ = cr.paint();
-    dst.flush();
-    if dst.status().is_err() {
-        return None;
-    }
-    gdk::pixbuf_get_from_surface(&dst, 0, 0, dst_w, dst_h)
 }
 
 // ---------------------------------------------------------------------------
@@ -275,8 +203,7 @@ impl Dock {
             return;
         }
         if self.preview.is_none() {
-            self.preview = Some(self.popup_new());
-            let preview = self.preview.as_ref().unwrap();
+            let preview = self.popup_new();
             let box_ = gtk::Box::new(gtk::Orientation::Vertical, 6);
             box_.set_border_width(6);
             let image_box = gtk::EventBox::new();
@@ -328,18 +255,21 @@ impl Dock {
             {
                 let weak = self.weak();
                 image_box.connect_button_press_event(move |_w, e| {
+                    let mut handled = glib::Propagation::Proceed;
                     if let Some(rc) = weak.upgrade() {
                         crate::util::with_dock(&rc, |d| {
                             let Some(hover) = d.hover_button else { return };
                             if e.button() == 1 {
                                 d.activate(hover);
                                 d.hide_preview();
+                                handled = glib::Propagation::Stop;
                             } else if e.button() == 2 {
                                 d.launch(hover);
+                                handled = glib::Propagation::Stop;
                             }
                         });
                     }
-                    glib::Propagation::Proceed
+                    handled
                 });
             }
             {
@@ -398,13 +328,17 @@ impl Dock {
             self.preview_close = Some(close);
             self.preview_status = Some(status);
             self.preview_workspace = Some(workspace);
+            self.preview = Some(preview);
         }
         self.update_preview();
-        self.preview.as_ref().unwrap().show_all();
+        let preview = self.preview.clone();
+        if let Some(preview) = preview.as_ref() {
+            preview.show_all();
+        }
         if let Some(hover) = self.hover_button {
             let anchor = self.button(hover).map(|b| b.main.clone());
-            if let Some(anchor) = anchor {
-                self.position_popup(self.preview.as_ref().unwrap(), anchor.upcast_ref());
+            if let (Some(anchor), Some(preview)) = (anchor, preview) {
+                self.position_popup(&preview, anchor.upcast_ref());
             }
         }
         if let Some(plugin) = &self.plugin {
@@ -523,10 +457,12 @@ impl Dock {
             label.set_text(&workspace);
         }
         self.preview_update_audio();
-        if self.preview.as_ref().is_some_and(|p| p.is_visible()) {
-            if let Some(anchor) = self.button(hover).map(|b| b.main.clone()) {
-                let preview = self.preview.as_ref().unwrap();
-                self.position_popup(preview, anchor.upcast_ref());
+        let preview = self.preview.clone();
+        if let Some(preview) = preview {
+            if preview.is_visible() {
+                if let Some(anchor) = self.button(hover).map(|b| b.main.clone()) {
+                    self.position_popup(&preview, anchor.upcast_ref());
+                }
             }
         }
     }
@@ -538,8 +474,7 @@ impl Dock {
             return;
         }
         if self.bubble.is_none() {
-            self.bubble = Some(self.popup_new());
-            let bubble = self.bubble.as_ref().unwrap();
+            let bubble = self.popup_new();
             let box_ = gtk::Box::new(gtk::Orientation::Vertical, 5);
             box_.set_border_width(8);
             box_.set_size_request(150, -1);
@@ -550,6 +485,7 @@ impl Dock {
             box_.pack_start(&bar, false, false, 0);
             self.bubble_text = Some(text);
             self.bubble_bar = Some(bar);
+            self.bubble = Some(bubble);
         }
         let status = self.audio_status(button_id);
         let text = if status.muted {
@@ -624,12 +560,13 @@ impl Dock {
         let (_, natural) = popup.preferred_size();
         let width = natural.width;
         let height = natural.height;
-        let display = gdk::Display::default().unwrap();
-        let monitor =
-            display.monitor_at_point(ax + allocation.width() / 2, ay + allocation.height() / 2);
         let mut bounds = gdk::Rectangle::new(0, 0, 1024, 768);
-        if let Some(monitor) = monitor {
-            bounds = monitor.workarea();
+        if let Some(display) = gdk::Display::default() {
+            if let Some(monitor) =
+                display.monitor_at_point(ax + allocation.width() / 2, ay + allocation.height() / 2)
+            {
+                bounds = monitor.workarea();
+            }
         }
         let (x, y);
         if self.orientation == gtk::Orientation::Horizontal {
@@ -673,14 +610,10 @@ impl Dock {
         self.hide_preview();
         self.bubble_id.clear();
         if let Some(preview) = self.preview.take() {
-            unsafe {
-                preview.destroy();
-            }
+            ffi_gtk::destroy(&preview);
         }
         if let Some(bubble) = self.bubble.take() {
-            unsafe {
-                bubble.destroy();
-            }
+            ffi_gtk::destroy(&bubble);
         }
         self.preview_image = None;
         self.preview_title = None;
