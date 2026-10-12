@@ -1,6 +1,19 @@
 # Zero Dock 验收记录
 
-## 0.3.0 七项方向落地验证
+## 0.3.0 Rust 重写验证
+
+2026-10-12，CachyOS、XFCE 4.20.8、GTK 3.24.52、X11、Rust 1.98.1，本机验证：
+
+- 干净构建目录 `--werror` 全量编译通过；`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、Python 语法检查通过。
+- `meson test` 7/7 通过：22 项 Rust 单元测试（含 3 项随 Rust 重写新增的启动探测评分测试）、3×2 秒隔离宿主冒烟、2 倍缩放版、5 轮压力、真实 wrapper-2.0 嵌入和私有音频恢复。
+- 隔离宿主在 `G_DEBUG=fatal-warnings` 下连续 10 次生命周期运行通过，同一私有 rc 文件复用配置。
+- 安装的 Chrome 155（临时配置）与 Thunar 4.20.10 在隔离桌面完成真实双窗口回归：首次启动绑定固定位置、最小化/恢复、第二窗口独立、关闭后接替、最后关闭恢复启动器全部通过。没有使用或关闭用户的浏览器窗口。
+- ASan 下 native-all、pinned-lifecycle、launch-feedback、identity-workspaces、improvements、audio-recovery 六条路径通过。GTK 进程级泄漏统计关闭，不是逐字节零泄漏证明。
+- 隔离测试脚本现在会清除宿主 Wayland 会话变量并强制 X11 后端（Chrome 夹具显式 `--ozone-platform=x11`），因此可以从 Wayland 桌面发起这些测试。
+
+Rust 集成覆盖尚未恢复全部 C 时代路径（见 [测试指南](docs/TESTING.md) 的剩余集成缺口）。24 小时长跑、真实休眠唤醒、多显示器混合 DPI 或热插拔、Steam/Wine/gamescope、Flatpak 与特殊浏览器配置仍待真实环境验证。以上为本机记录，不代表所有发行版与硬件组合。
+
+## 0.3.0（C 实现）七项方向落地验证
 
 2026-10-01，Arch/CachyOS、XFCE 4.20、GTK 3.24、X11，本机验证：
 

@@ -17,8 +17,8 @@ use glib::translate::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::os::raw::{c_int, c_ulong, c_void};
-use x11::xlib;
 use x11::xinput2;
+use x11::xlib;
 
 pub use x11::xlib::{Atom, Display, Window, XA_CARDINAL};
 
@@ -293,10 +293,8 @@ pub fn watch_window_properties(xid: Window) -> Option<gdk::Window> {
     }
     unsafe {
         error_trap_push();
-        let foreign = gdk_x11_window_foreign_new_for_display(
-            gdk_ffi::gdk_display_get_default(),
-            xid,
-        );
+        let foreign =
+            gdk_x11_window_foreign_new_for_display(gdk_ffi::gdk_display_get_default(), xid);
         let window = if foreign.is_null() {
             None
         } else {
@@ -384,8 +382,7 @@ unsafe fn render_scaled(
     dst_w: i32,
     dst_h: i32,
 ) -> Option<gdk_pixbuf::Pixbuf> {
-    let src =
-        cairo_xlib_surface_create(x, pix as c_ulong, visual, src_w, src_h);
+    let src = cairo_xlib_surface_create(x, pix as c_ulong, visual, src_w, src_h);
     if src.is_null() {
         return None;
     }

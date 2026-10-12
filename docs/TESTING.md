@@ -27,6 +27,8 @@ python tests/run-isolated.py build-dev --iterations 10 --seconds 2
 
 The harness starts a private D-Bus session, Xvfb display and xfwm4 compositor, then launches the real Rust `zero-dock-test-host` repeatedly with `G_DEBUG=fatal-warnings`. Runs reuse the same private rc file, so construction, config load/save, timer teardown, Xfw/signal teardown and clean process exit are exercised across repeated lifecycles without touching the user's desktop.
 
+Both harnesses force the private session to X11 (Wayland session variables are cleared; `GDK_BACKEND=x11` and `XDG_SESSION_TYPE=x11` are set), so they behave identically when started from a Wayland desktop; the Chrome fixture additionally passes `--ozone-platform=x11`.
+
 The default is three two-second lifecycle runs. `--private-audio` additionally starts disposable PipeWire/Pulse services when those binaries are available. `--scale 2` and `--geometry WIDTHxHEIGHT` cover basic scale/geometry variants.
 
 ## Manual GUI test host

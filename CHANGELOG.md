@@ -1,7 +1,11 @@
 # Changelog
 
-## 0.3.0 — 2026-10-01
+## 0.3.0 — 2026-10-12
 
+- Rewrite the panel plugin from C to Rust. The cdylib exports the XFCE module entry point directly; `unsafe` is confined to five FFI modules under a crate-root `#![deny(unsafe_code)]`, and every behavior module builds with zero `unsafe`.
+- Fix a plugin object reference leak when opening the preferences dialog (the plugin could be finalized while the panel still held it) and restore the screen default icon theme, so application icons follow the user's icon theme again.
+- Score launcher-to-window matching so a launcher claims the window it just started instead of growing a duplicate button, and register menus opened without a GDK event so the panel does not auto-hide under them.
+- Fix a cairo surface leak in preview capture and a stale temp file that could block future configuration saves; keep the current association rule when the app chooser is confirmed without a selection.
 - Add persistent, exact window-class associations with a desktop-file chooser and per-window rule removal. Manual rules take priority; indistinguishable classes share a rule.
 - Limit visible icons with an overflow menu while preserving separate window buttons, workspace filtering, saved pin order and access to hidden windows.
 - Add preview close controls, workspace labels, complete title tooltips and monitor-aware thumbnail and popup limits.
@@ -9,6 +13,7 @@
 - Back up and restore pinned apps, associations and preferences through native file choosers. Validate imports and automatically preserve the current configuration before replacement; retain running windows.
 - Bound thumbnail caches to 32 MiB per instance and evict older frames under pressure.
 - Extend isolated testing with installed Chrome/Thunar window lifecycles, disposable audio server recovery, scale/theme checks and configurable stress runs; add read-only desktop association inspection.
+- Make the isolated suites runnable from Wayland desktop sessions: clear Wayland host variables, force the private session's X11 backend and pin Chrome to `--ozone-platform=x11`.
 
 ## 0.2.0 — 2026-10-01
 

@@ -12,10 +12,7 @@ use gtk::prelude::*;
 use std::os::raw::c_void;
 
 extern "C" {
-    fn pango_cairo_show_layout(
-        cr: *mut cairo::ffi::cairo_t,
-        layout: *mut pango::ffi::PangoLayout,
-    );
+    fn pango_cairo_show_layout(cr: *mut cairo::ffi::cairo_t, layout: *mut pango::ffi::PangoLayout);
     fn g_key_file_set_string_list(
         key_file: *mut glib::ffi::GKeyFile,
         group_name: *const std::os::raw::c_char,
@@ -67,12 +64,7 @@ pub fn app_info_executable(app: &impl IsA<gio::AppInfo>) -> String {
 
 /// `g_key_file_set_string_list()`: store a list that `KeyFile::string_list`
 /// reads back.
-pub fn key_file_set_string_list(
-    file: &glib::KeyFile,
-    group: &str,
-    key: &str,
-    values: &[String],
-) {
+pub fn key_file_set_string_list(file: &glib::KeyFile, group: &str, key: &str, values: &[String]) {
     let group = std::ffi::CString::new(group).unwrap_or_default();
     let key = std::ffi::CString::new(key).unwrap_or_default();
     let owned: Vec<std::ffi::CString> = values

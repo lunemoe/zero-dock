@@ -1127,13 +1127,16 @@ fn scenario_improvements() -> TestResult {
         let d = host.dock.borrow();
         // The dock must use the screen default theme so lookups follow the
         // user's icon theme instead of the Adwaita/hicolor fallbacks.
-        let dock_theme: *mut glib::gobject_ffi::GObject =
-            glib::translate::ToGlibPtr::to_glib_none(&d.icon_theme.clone().upcast::<glib::Object>())
-                .0;
+        let dock_theme: *mut glib::gobject_ffi::GObject = glib::translate::ToGlibPtr::to_glib_none(
+            &d.icon_theme.clone().upcast::<glib::Object>(),
+        )
+        .0;
         let default_theme = gtk::IconTheme::default().expect("default icon theme");
         let screen_theme: *mut glib::gobject_ffi::GObject =
-            glib::translate::ToGlibPtr::to_glib_none(&default_theme.clone().upcast::<glib::Object>())
-                .0;
+            glib::translate::ToGlibPtr::to_glib_none(
+                &default_theme.clone().upcast::<glib::Object>(),
+            )
+            .0;
         check!(
             dock_theme == screen_theme,
             "dock must use the screen default icon theme"
@@ -1850,6 +1853,9 @@ fn spawn_real_app(kind: &str, dir: &Path) -> Result<Child, String> {
                 "--disable-sync".to_string(),
                 "--disable-extensions".to_string(),
                 "--disable-gpu".to_string(),
+                // The isolated session is X11; without this flag Chrome's
+                // ozone auto-detection follows a Wayland host session.
+                "--ozone-platform=x11".to_string(),
                 "--password-store=basic".to_string(),
                 "--new-window".to_string(),
                 "about:blank".to_string(),

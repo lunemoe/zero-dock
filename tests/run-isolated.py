@@ -12,6 +12,30 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 
+WAYLAND_HOST_VARIABLES = (
+    "CLUTTER_BACKEND",
+    "ELECTRON_OZONE_PLATFORM_HINT",
+    "MOZ_ENABLE_WAYLAND",
+    "SDL_VIDEODRIVER",
+    "WAYLAND_DISPLAY",
+)
+
+
+def sanitized_env():
+    """Environment for the private X11 session.
+
+    Values inherited from a Wayland host desktop would otherwise leak in: GDK
+    clients ignore DISPLAY when a Wayland backend is named, and Chrome's ozone
+    auto-detection follows XDG_SESSION_TYPE, so both fail against the isolated
+    session's missing compositor.
+    """
+    env = os.environ.copy()
+    for name in WAYLAND_HOST_VARIABLES:
+        env.pop(name, None)
+    env["GDK_BACKEND"] = "x11"
+    env["XDG_SESSION_TYPE"] = "x11"
+    return env
+
 
 def stop(process):
     if process is not None and process.poll() is None:
@@ -55,7 +79,7 @@ def main():
         with tempfile.TemporaryDirectory(
             prefix="zero-dock-session-", ignore_cleanup_errors=True
         ) as temporary:
-            env = os.environ.copy()
+            env = sanitized_env()
             env.update(
                 XDG_CONFIG_HOME=temporary,
                 XDG_CACHE_HOME=temporary,
@@ -112,7 +136,7 @@ def main():
         if not display.isdigit():
             raise RuntimeError("Xvfb display allocation failed")
 
-        env = os.environ.copy()
+        env = sanitized_env()
         env.update(DISPLAY=":" + display)
         env.pop("XAUTHORITY", None)
         env.pop("SESSION_MANAGER", None)
