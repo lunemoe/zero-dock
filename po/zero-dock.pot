@@ -6,7 +6,7 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: zero-dock 0.3.1\n"
+"Project-Id-Version: zero-dock 0.3.2\n"
 "Report-Msgid-Bugs-To: https://github.com/lunemoe/zero-dock/issues\n"
 "POT-Creation-Date: 2026-10-13 17:34+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"

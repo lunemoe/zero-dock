@@ -3,6 +3,7 @@
 
 use crate::dock::Dock;
 use crate::util::t;
+use gio::prelude::*;
 use glib::subclass::prelude::*;
 use gtk::prelude::*;
 
@@ -17,6 +18,10 @@ mod adaptive {
     pub struct AdaptiveBox {
         pub unit: Cell<i32>,
         pub natural: Cell<i32>,
+        pub embedded_hint: Cell<Option<(i32, i32)>>,
+        pub panel_proxy: RefCell<Option<gio::DBusProxy>>,
+        pub automatic: Cell<Option<bool>>,
+        pub overhead: Cell<i32>,
         pub allocate: RefCell<Option<AllocateCallback>>,
     }
 
@@ -108,6 +113,162 @@ impl AdaptiveBox {
         } else {
             gtk::Align::Fill
         });
+        self.sync_embedded_hint();
+    }
+
+    fn refresh_panel_mode(&self, proxy: &gio::DBusProxy) {
+        let mut ancestor = self.parent();
+        let mut identifier = None;
+        while let Some(widget) = ancestor {
+            if widget.find_property("unique-id").is_some() {
+                identifier = Some(widget.property::<i32>("unique-id"));
+                break;
+            }
+            ancestor = widget.parent();
+        }
+        let properties = proxy
+            .call_sync(
+                "GetAllProperties",
+                Some(&("xfce4-panel", "/panels").to_variant()),
+                gio::DBusCallFlags::NONE,
+                1000,
+                gio::Cancellable::NONE,
+            )
+            .ok()
+            .and_then(|reply| {
+                reply
+                    .child_value(0)
+                    .get::<std::collections::HashMap<String, glib::Variant>>()
+            });
+        let automatic = properties
+            .as_ref()
+            .and_then(|properties| {
+                let identifier = identifier?;
+                let panel = properties.iter().find_map(|(name, value)| {
+                    if !name.ends_with("/plugin-ids") {
+                        return None;
+                    }
+                    let contains = (0..value.n_children()).any(|index| {
+                        let child = value.child_value(index);
+                        let child = child.as_variant().unwrap_or(child);
+                        child.get::<i32>() == Some(identifier)
+                            || child.get::<u32>() == Some(identifier as u32)
+                    });
+                    contains.then(|| name.trim_end_matches("/plugin-ids").to_owned())
+                })?;
+                Some(
+                    properties
+                        .get(&format!("{panel}/length-adjust"))
+                        .and_then(|value| value.get::<bool>())
+                        .unwrap_or(true),
+                )
+            })
+            .unwrap_or(true);
+        self.imp().automatic.set(Some(automatic));
+    }
+
+    fn sync_embedded_hint(&self) {
+        let imp = self.imp();
+        // GtkSocket receives only WM_NORMAL_HINTS from a foreign GtkPlug,
+        // losing the child's natural size. Publish the content extent there
+        // while keeping our GTK minimum small enough for real overflow.
+        if let Some(plug) = self
+            .toplevel()
+            .and_then(|top| top.downcast::<gtk::Plug>().ok())
+        {
+            if imp.automatic.get().is_none() {
+                imp.automatic.set(Some(true));
+                if let Ok(proxy) = gio::DBusProxy::for_bus_sync(
+                    gio::BusType::Session,
+                    gio::DBusProxyFlags::DO_NOT_LOAD_PROPERTIES,
+                    None,
+                    "org.xfce.Xfconf",
+                    "/org/xfce/Xfconf",
+                    "org.xfce.Xfconf",
+                    gio::Cancellable::NONE,
+                ) {
+                    self.refresh_panel_mode(&proxy);
+                    let weak = self.downgrade();
+                    proxy.connect_local("g-signal", false, move |values| {
+                        let proxy = values[0].get::<gio::DBusProxy>().expect("signal proxy");
+                        let signal = values[2].get::<String>().expect("signal name");
+                        let parameters =
+                            values[3].get::<glib::Variant>().expect("signal parameters");
+                        if (signal == "PropertyChanged" || signal == "PropertyRemoved")
+                            && parameters.child_value(0).get::<String>().as_deref()
+                                == Some("xfce4-panel")
+                        {
+                            if let Some(widget) = weak.upgrade() {
+                                widget.refresh_panel_mode(&proxy);
+                                widget.sync_embedded_hint();
+                                widget.queue_resize();
+                            }
+                        }
+                        None
+                    });
+                    imp.panel_proxy.replace(Some(proxy));
+                }
+            }
+            let unit = imp.unit.get().max(1);
+            let horizontal = self.orientation() == gtk::Orientation::Horizontal;
+            if let Some((panel, socket)) = plug
+                .socket_window()
+                .and_then(|socket| crate::ffi_x11::embedded_panel_extent(&socket, horizontal))
+            {
+                if socket >= unit && panel >= socket {
+                    imp.overhead.set(panel - socket);
+                }
+            }
+            let natural = if imp.automatic.get() == Some(false) {
+                // A fixed panel must allocate the actual remaining space;
+                // publishing content as a minimum would defeat that limit.
+                unit
+            } else {
+                let available = plug
+                    .window()
+                    .and_then(|window| window.display().monitor_at_window(&window))
+                    .map(|monitor| {
+                        let geometry = monitor.geometry();
+                        let extent = if horizontal {
+                            geometry.width()
+                        } else {
+                            geometry.height()
+                        };
+                        (extent - imp.overhead.get()).max(unit)
+                    })
+                    .unwrap_or(imp.natural.get());
+                if imp.natural.get() > available {
+                    content_length(unit, visible_capacity(available, unit as u32))
+                } else {
+                    imp.natural.get()
+                }
+            };
+            let dimensions = if self.orientation() == gtk::Orientation::Horizontal {
+                (natural, unit)
+            } else {
+                (unit, natural)
+            };
+            if imp.embedded_hint.replace(Some(dimensions)) != Some(dimensions) {
+                let geometry = gdk::Geometry::new(
+                    dimensions.0,
+                    dimensions.1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0.0,
+                    0.0,
+                    gdk::Gravity::NorthWest,
+                );
+                plug.set_geometry_hints(
+                    None::<&gtk::Widget>,
+                    Some(&geometry),
+                    gdk::WindowHints::MIN_SIZE,
+                );
+            }
+        }
     }
 
     pub fn on_allocate(&self, callback: impl Fn(i32) + 'static) {

@@ -74,12 +74,58 @@ pub fn xdisplay() -> *mut Display {
 }
 
 /// The X window id behind a GDK window (used by the test harness).
-#[cfg(feature = "test-harness")]
 pub fn window_xid(window: &gdk::Window) -> u64 {
     extern "C" {
         fn gdk_x11_window_get_xid(window: *mut gdk_ffi::GdkWindow) -> c_ulong;
     }
     unsafe { gdk_x11_window_get_xid(window.to_glib_none().0) as u64 }
+}
+
+/// The physical XEmbed parent's extent and socket extent, in logical pixels.
+/// GDK treats foreign windows as root children, so query the real X parent.
+pub fn embedded_panel_extent(socket: &gdk::Window, horizontal: bool) -> Option<(i32, i32)> {
+    unsafe {
+        let display = xdisplay();
+        let xid = window_xid(socket);
+        let (mut root, mut parent, mut children, mut count) = (0, 0, std::ptr::null_mut(), 0);
+        error_trap_push();
+        let tree = xlib::XQueryTree(
+            display,
+            xid,
+            &mut root,
+            &mut parent,
+            &mut children,
+            &mut count,
+        );
+        if !children.is_null() {
+            xlib::XFree(children as *mut c_void);
+        }
+        let mut extents = Vec::new();
+        if tree != 0 && parent != root {
+            for window in [parent, xid] {
+                let (mut x, mut y, mut w, mut h, mut border, mut depth) = (0, 0, 0, 0, 0, 0);
+                if xlib::XGetGeometry(
+                    display,
+                    window,
+                    &mut root,
+                    &mut x,
+                    &mut y,
+                    &mut w,
+                    &mut h,
+                    &mut border,
+                    &mut depth,
+                ) != 0
+                {
+                    extents.push(if horizontal { w } else { h });
+                }
+            }
+        }
+        if error_trap_pop() || extents.len() != 2 {
+            return None;
+        }
+        let scale = socket.scale_factor().max(1);
+        Some((extents[0] as i32 / scale, extents[1] as i32 / scale))
+    }
 }
 
 pub fn intern_atom(name: &str) -> Atom {

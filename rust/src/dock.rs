@@ -1008,9 +1008,9 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
     }
 
     // Plugin presentation
-    // XEmbed sockets only forward a minimum requisition, not GTK's natural
-    // size. Ask the panel for its actual remaining space; the aligned inner
-    // container requests only its contents and overflows within that space.
+    // The XEmbed size hint carries the natural content length so automatic
+    // panels can grow. Expansion lets XFCE allocate less than that hint when
+    // the monitor or a fixed-length panel runs out of room.
     plugin_ptr.set_shrink(false);
     plugin_ptr.set_expand(true);
     plugin_ptr.menu_show_configure();

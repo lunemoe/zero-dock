@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 — 2026-10-13
+
+- Fix automatic XFCE panels collapsing Zero Dock into a single overflow button after startup or a panel restart. Publish content-derived XEmbed hints for automatic panels and retain a small minimum for fixed panels; bound content by the monitor's space after other panel items.
+- Add a real XFCE panel regression for startup, window-driven growth/shrinkage, fixed-length overflow and vertical orientation alongside external-wrapper checks.
+
 ## 0.3.1 — 2026-10-13
 
 - Adapt the icon area to content and actual panel allocation, with automatic overflow and expansion in both orientations; migrate old reserved-slot and icon-limit settings.

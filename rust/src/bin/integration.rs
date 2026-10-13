@@ -175,6 +175,40 @@ mod raw {
     pub fn ref_count(object: *mut GObject) -> u32 {
         unsafe { (*object).ref_count }
     }
+
+    pub fn window_geometry(xid: u64) -> Option<(i32, i32, u32, u32)> {
+        unsafe {
+            let display = test_api::xdisplay();
+            let (mut root, mut child) = (0, 0);
+            let (mut x, mut y, mut width, mut height, mut border, mut depth) = (0, 0, 0, 0, 0, 0);
+            if xlib::XGetGeometry(
+                display,
+                xid,
+                &mut root,
+                &mut x,
+                &mut y,
+                &mut width,
+                &mut height,
+                &mut border,
+                &mut depth,
+            ) == 0
+            {
+                return None;
+            }
+            xlib::XTranslateCoordinates(display, xid, root, 0, 0, &mut x, &mut y, &mut child);
+            let scale = gdk::Screen::default()
+                .and_then(|screen| screen.root_window())
+                .map(|window| window.scale_factor())
+                .unwrap_or(1)
+                .max(1);
+            Some((
+                x / scale,
+                y / scale,
+                width / scale as u32,
+                height / scale as u32,
+            ))
+        }
+    }
 }
 
 static NEXT_ID: AtomicU32 = AtomicU32::new(12000);
@@ -1828,6 +1862,202 @@ fn scenario_external_wrappers() -> TestResult {
     Ok(())
 }
 
+fn scenario_panel_autolength() -> TestResult {
+    struct PanelProcess(Child);
+    impl Drop for PanelProcess {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    fn property(name: &str, kind: &str, value: &str, array: bool) -> TestResult {
+        let mut command = Command::new("xfconf-query");
+        command.args([
+            "-c",
+            "xfce4-panel",
+            "-p",
+            name,
+            "-n",
+            "-t",
+            kind,
+            "-s",
+            value,
+        ]);
+        if array {
+            command.arg("-a");
+        }
+        check!(
+            command.status().map_err(|e| e.to_string())?.success(),
+            "cannot set {name}"
+        );
+        Ok(())
+    }
+
+    fn socket_geometry(parent: u32) -> Option<(i32, i32, u32, u32)> {
+        for process in fs::read_dir("/proc").ok()?.flatten() {
+            let path = process.path();
+            let Ok(bytes) = fs::read(path.join("cmdline")) else {
+                continue;
+            };
+            let args: Vec<&[u8]> = bytes.split(|byte| *byte == 0).collect();
+            if args.len() < 4 || args[2] != b"9093" || !args[1].ends_with(b"/libzero-dock.so") {
+                continue;
+            }
+            let Ok(status) = fs::read_to_string(path.join("status")) else {
+                continue;
+            };
+            let ppid = status
+                .lines()
+                .find_map(|line| line.strip_prefix("PPid:"))
+                .and_then(|value| value.trim().parse::<u32>().ok());
+            if ppid == Some(parent) {
+                let xid = std::str::from_utf8(args[3]).ok()?.parse::<u64>().ok()?;
+                return raw::window_geometry(xid);
+            }
+        }
+        None
+    }
+
+    let build = PathBuf::from(std::env::var("ZERO_DOCK_TEST_BUILD").map_err(|e| e.to_string())?);
+    let dir = temp_dir("panel-autolength");
+    let share = dir.join("usr/share");
+    let data = share.join("xfce4/panel/plugins");
+    let lib = dir.join("usr/lib/xfce4/panel/plugins");
+    fs::create_dir_all(&data).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&lib).map_err(|e| e.to_string())?;
+    fs::copy(build.join("libzero-dock.so"), lib.join("libzero-dock.so"))
+        .map_err(|e| e.to_string())?;
+    fs::write(data.join("zero-dock-paneltest.desktop"),
+        "[Xfce Panel]\nType=X-XFCE-PanelPlugin\nName=Zero Dock Layout Test\nComment=Isolated adaptive panel regression\nX-XFCE-Module=zero-dock\nX-XFCE-API=2.0\nX-XFCE-Internal=false\n").map_err(|e| e.to_string())?;
+    property("/configver", "int", "2", false)?;
+    property("/panels", "int", "1", true)?;
+    property("/panels/panel-1/plugin-ids", "int", "9093", true)?;
+    for (name, kind, value) in [
+        ("/panels/panel-1/size", "int", "48"),
+        ("/panels/panel-1/mode", "int", "0"),
+        ("/panels/panel-1/length", "double", "1.0"),
+        ("/panels/panel-1/length-adjust", "bool", "true"),
+        ("/panels/panel-1/position-locked", "bool", "true"),
+        ("/panels/panel-1/position", "string", "p=10;x=0;y=0"),
+        ("/plugins/plugin-9093", "string", "zero-dock-paneltest"),
+    ] {
+        property(name, kind, value, false)?;
+    }
+    let first = fixture("Panel Red", "PanelRed");
+    let second = fixture("Panel Green", "PanelGreen");
+    let third = fixture("Panel Blue", "PanelBlue");
+    color_icon(&first, 0xdd3333ff);
+    color_icon(&second, 0x33dd33ff);
+    color_icon(&third, 0x3333ddff);
+    pump(100);
+    let mut panel = PanelProcess(
+        Command::new("xfce4-panel")
+            .args(["--disable-wm-check"])
+            .env("XDG_DATA_HOME", &share)
+            .env_remove("G_DEBUG")
+            .spawn()
+            .map_err(|e| e.to_string())?,
+    );
+    let parent = panel.0.id();
+    check!(
+        wait_until(5000, || socket_geometry(parent)
+            .is_some_and(|(_, _, w, h)| w == 148 && h == 48)),
+        "automatic XFCE panel must request all three icons, got {:?}",
+        socket_geometry(parent)
+    );
+    if let Ok(output) = std::env::var("ZERO_DOCK_TEST_IMAGES") {
+        let (x, y, w, h) = socket_geometry(parent).ok_or("panel socket")?;
+        let root = gdk::Screen::default()
+            .and_then(|screen| screen.root_window())
+            .ok_or("root window")?;
+        let pixels = root
+            .pixbuf(x, y, w as i32, h as i32)
+            .ok_or("panel snapshot")?;
+        fs::create_dir_all(&output).map_err(|e| e.to_string())?;
+        pixels
+            .savev(Path::new(&output).join("panel-autolength.png"), "png", &[])
+            .map_err(|e| e.to_string())?;
+    }
+    third.close();
+    check!(
+        wait_until(3000, || socket_geometry(parent)
+            .is_some_and(|(_, _, w, _)| w == 98)),
+        "automatic panel must shrink after closing a window, got {:?}",
+        socket_geometry(parent)
+    );
+    let fourth = fixture("Panel Yellow", "PanelYellow");
+    color_icon(&fourth, 0xdddd33ff);
+    check!(
+        wait_until(3000, || socket_geometry(parent)
+            .is_some_and(|(_, _, w, _)| w == 148)),
+        "automatic panel must grow when a window opens, got {:?}",
+        socket_geometry(parent)
+    );
+
+    property("/panels/panel-1/length-adjust", "bool", "false", false)?;
+    property("/panels/panel-1/length", "double", "8.0", false)?;
+    check!(
+        wait_until(3000, || socket_geometry(parent)
+            .is_some_and(|(_, _, w, _)| w < 148)),
+        "fixed panel must allocate less than content when necessary"
+    );
+    property("/panels/panel-1/length-adjust", "bool", "true", false)?;
+    check!(
+        wait_until(3000, || socket_geometry(parent)
+            .is_some_and(|(_, _, w, _)| w == 148)),
+        "restoring automatic length must expand hidden icons again"
+    );
+    property("/panels/panel-1/mode", "int", "1", false)?;
+    check!(
+        wait_until(3000, || socket_geometry(parent)
+            .is_some_and(|(_, _, w, h)| w == 48 && h == 148)),
+        "vertical automatic panel must use content height, got {:?}",
+        socket_geometry(parent)
+    );
+    check!(
+        panel.0.try_wait().map_err(|e| e.to_string())?.is_none(),
+        "native panel exited"
+    );
+    property("/panels/panel-1/mode", "int", "0", false)?;
+    let monitor_width = gdk::Display::default()
+        .and_then(|display| display.monitor(0))
+        .ok_or("panel monitor")?
+        .geometry()
+        .width();
+    let extras: Vec<_> = (0..monitor_width / 50 + 2)
+        .map(|index| fixture(&format!("Panel extra {index}"), "PanelExtra"))
+        .collect();
+    check!(
+        wait_until(3000, || socket_geometry(parent).is_some_and(
+            |(x, _, w, h)| {
+                h == 48
+                    && w > 148
+                    && x >= 0
+                    && x + w as i32 <= monitor_width
+                    && (w as usize) < (extras.len() + 3) * 50 - 2
+            }
+        )),
+        "content beyond the monitor must remain bounded, got {:?}",
+        socket_geometry(parent)
+    );
+    for window in extras {
+        window.close();
+    }
+    check!(
+        wait_until(3000, || socket_geometry(parent)
+            .is_some_and(|(_, _, w, _)| w == 148)),
+        "closing excess windows must restore the content length"
+    );
+    first.close();
+    second.close();
+    fourth.close();
+    drop(panel);
+    pump(100);
+    let _ = fs::remove_dir_all(dir);
+    Ok(())
+}
+
 fn center_rgb(pixbuf: &gdk_pixbuf::Pixbuf) -> (u8, u8, u8) {
     let bytes = pixbuf.read_pixel_bytes();
     let pixels = bytes.as_ref();
@@ -2509,6 +2739,7 @@ fn scenarios() -> Vec<Scenario> {
         ("adaptive-reliability", scenario_adaptive_reliability),
         ("native-all", scenario_native_all),
         ("external-wrappers", scenario_external_wrappers),
+        ("panel-autolength", scenario_panel_autolength),
         ("pinned-lifecycle", scenario_pinned_lifecycle),
         ("launch-feedback", scenario_launch_feedback),
         ("identity-workspaces", scenario_identity_workspaces),

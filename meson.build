@@ -1,4 +1,4 @@
-project('zero-dock', version: '0.3.1', license: 'MIT', meson_version: '>=0.63.0',
+project('zero-dock', version: '0.3.2', license: 'MIT', meson_version: '>=0.63.0',
         default_options: ['buildtype=debugoptimized'])
 cargo = find_program('cargo')
 copy = find_program('cp')
@@ -130,7 +130,8 @@ if get_option('tests')
     if wrapper.found()
       test('rust-integration-external-wrapper', python3,
            args: [meson.current_source_dir() / 'tests/run-integration.py',
-                  meson.current_build_dir(), '--scenario', 'external-wrappers'],
+                  meson.current_build_dir(), '--scenario', 'external-wrappers',
+                  '--scenario', 'panel-autolength'],
            depends: [integration_bin, plugin_lib],
            suite: ['integration', 'wrapper'],
            timeout: 90,
