@@ -20,18 +20,30 @@ def properties():
                 run('xfconf-query', '-c', 'xfce4-panel', '-lv').splitlines())
 
 
-def wrappers(identifier):
+def panel_pid():
+    reply = run('gdbus', 'call', '--session', '--dest', 'org.freedesktop.DBus',
+                '--object-path', '/org/freedesktop/DBus', '--method',
+                'org.freedesktop.DBus.GetConnectionUnixProcessID', 'org.xfce.Panel')
+    match = re.fullmatch(r'\(uint32 (\d+),\)', reply)
+    if not match:
+        raise SystemExit('Cannot identify the panel for the current D-Bus session')
+    return int(match[1])
+
+
+def wrappers(identifier, parent):
     result = []
     for path in Path('/proc').iterdir():
         if not path.name.isdigit():
             continue
         try:
             args = (path / 'cmdline').read_bytes().split(b'\0')
+            status = (path / 'status').read_text()
         except (FileNotFoundError, PermissionError, ProcessLookupError):
             continue
         if (len(args) > 3 and Path(args[0].decode(errors='replace')).name == 'wrapper-2.0'
                 and Path(args[1].decode(errors='replace')).name == 'libzero-dock.so'
-                and args[2] == str(identifier).encode()):
+                and args[2] == str(identifier).encode()
+                and re.search(rf'^PPid:\s+{parent}$', status, re.MULTILINE)):
             result.append(int(path.name))
     return result
 
@@ -64,33 +76,36 @@ def main():
     if len(panels) != 1:
         raise SystemExit('Expected one panel containing the selected instance')
     name, ids = next(iter(panels.items()))
+    parent = panel_pid()
+    old = wrappers(args.instance, parent)
+    if len(old) != 1:
+        raise SystemExit('Expected one external wrapper in the selected panel session')
     print(f'Zero Dock instance {args.instance}: {name}, preserving order {ids}')
     if not args.apply:
         return
     run('gdbus', 'call', '--session', '--dest', 'org.xfce.Panel',
         '--object-path', '/org/xfce/Panel', '--method', 'org.xfce.Panel.Save')
-    config = Path.home() / '.config/xfce4/panel' / f'zero-dock-{args.instance}.rc'
+    config_home = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
+    state_home = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
+    config = config_home / 'xfce4/panel' / f'zero-dock-{args.instance}.rc'
     if not config.is_file():
         raise SystemExit('Configuration file missing; instance was left running')
-    backup = (Path.home() / '.local/state/zero-dock/backups' /
+    backup = (state_home / 'zero-dock/backups' /
               datetime.now().astimezone().strftime('%Y%m%d-%H%M%S'))
     backup.mkdir(parents=True, mode=0o700)
     snapshot = backup / config.name
     shutil.copy2(config, snapshot)
-    panel_config = Path.home() / '.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml'
+    panel_config = config_home / 'xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml'
     if panel_config.is_file():
         shutil.copy2(panel_config, backup / panel_config.name)
-    old = wrappers(args.instance)
-    if len(old) != 1:
-        raise SystemExit('Expected one running external wrapper for the selected instance')
     # XFCE 4.20 treats a wrapper's SIGUSR1 exit as a requested restart:
     # https://gitlab.xfce.org/xfce/xfce4-panel/-/blob/xfce4-panel-4.20.8/panel/panel-plugin-external.c#L744
     # Save and back up first; leave both panel item lists and plugin IDs intact.
     os.kill(old[0], signal.SIGUSR1)
-    pids = wait_for(lambda: [pid for pid in wrappers(args.instance) if pid not in old],
+    pids = wait_for(lambda: [pid for pid in wrappers(args.instance, parent) if pid not in old],
                     'the replacement dock wrapper')
     time.sleep(.5)
-    if not wrappers(args.instance):
+    if not wrappers(args.instance, parent):
         raise RuntimeError('Replacement wrapper exited during startup')
     if properties().get(name) != current[name]:
         raise RuntimeError('Panel item order changed unexpectedly')

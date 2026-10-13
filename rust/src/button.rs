@@ -468,6 +468,14 @@ impl Dock {
         ffi_xfce::Window::new(&window).close(timestamp);
     }
 
+    pub fn middle_click(&mut self, button_id: u64) {
+        match self.settings.middle_action {
+            0 => self.launch(button_id),
+            1 => self.close_window(button_id),
+            _ => {}
+        }
+    }
+
     pub fn cycle(&mut self, delta: i32) {
         let mut candidates: Vec<u64> = Vec::new();
         let mut active_index: i32 = -1;
@@ -497,7 +505,7 @@ impl Dock {
                 len - 1
             }
         } else {
-            (active_index + delta + len) % len
+            (active_index + delta.rem_euclid(len)).rem_euclid(len)
         };
         let id = candidates[index as usize];
         self.activate(id);
@@ -556,12 +564,14 @@ impl Dock {
                 }
                 self.save();
                 self.refresh();
+                self.refresh_launcher_manager();
                 return;
             }
         }
         if self.add_pin(&path).is_some() {
             self.save();
             self.refresh();
+            self.refresh_launcher_manager();
         }
     }
 
@@ -587,6 +597,7 @@ impl Dock {
         }
         self.save();
         self.update_buttons();
+        self.refresh_launcher_manager();
     }
 
     pub fn move_button(&mut self, source: u64, target: u64, after: bool) {
@@ -607,6 +618,7 @@ impl Dock {
         }
         self.save();
         self.update_buttons();
+        self.refresh_launcher_manager();
     }
 
     // -- audio scroll entry point (shared with preview popup) ---------------
@@ -712,11 +724,7 @@ fn wire_button(b: &mut Button, weak: DockWeak) {
                     }
                     inhibit = glib::Propagation::Stop;
                 } else if e.button() == 2 {
-                    match d.settings.middle_action {
-                        0 => d.launch(button_id),
-                        1 => d.close_window(button_id),
-                        _ => {}
-                    }
+                    d.middle_click(button_id);
                     inhibit = glib::Propagation::Stop;
                 }
             });
@@ -1366,6 +1374,7 @@ impl Dock {
             }
         }
         self.preview_update_audio();
+        self.update_overflow_status();
     }
 }
 

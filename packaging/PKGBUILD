@@ -1,6 +1,6 @@
 pkgname=xfce4-zero-dock-plugin
-pkgver=0.3.0
-pkgrel=3
+pkgver=0.3.1
+pkgrel=1
 pkgdesc='Native XFCE X11 dock with independent windows, launchers, previews and application audio'
 url='https://github.com/lunemoe/zero-dock'
 arch=('x86_64')
@@ -9,7 +9,7 @@ depends=('xfce4-panel' 'libxfce4ui' 'libxfce4windowing' 'gtk3' 'glib2' 'libpulse
 makedepends=('meson' 'ninja' 'rust' 'libxtst' 'gettext')
 options=('!debug')
 source=("https://github.com/lunemoe/zero-dock/releases/download/v$pkgver/zero-dock-$pkgver.tar.gz")
-sha256sums=('dde71380aa11abfeb1c07d2fda924c0d99d9b8a16b9e777e296da5fd2b26a08c')
+sha256sums=('19cbe7a45b990bc78b78de28452c3815d789c9f88a95a8fa57b620bfea06f20f')
 build() {
     arch-meson "zero-dock-$pkgver" build --buildtype=release -Dtests=true
     meson compile -C build

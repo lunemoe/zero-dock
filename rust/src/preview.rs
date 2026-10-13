@@ -90,6 +90,7 @@ impl Dock {
                 .map(|w| (w.clone(), ffi_xfce::Window::new(w).is_minimized()))
         })?;
         if !minimized {
+            self.capture_attempts += 1;
             let client = ffi_xfce::Window::new(&window).xid();
             // The display's workarea bounds the thumbnail so a capture never
             // allocates more than the preview can show.
@@ -102,6 +103,8 @@ impl Dock {
                     b.thumbnail_time = monotonic_us();
                 }
                 self.trim_frames(button_id);
+            } else {
+                self.capture_failures += 1;
             }
         }
         self.button(button_id).and_then(|b| b.thumbnail.clone())
@@ -264,7 +267,7 @@ impl Dock {
                                 d.hide_preview();
                                 handled = glib::Propagation::Stop;
                             } else if e.button() == 2 {
-                                d.launch(hover);
+                                d.middle_click(hover);
                                 handled = glib::Propagation::Stop;
                             }
                         });

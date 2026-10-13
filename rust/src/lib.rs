@@ -26,6 +26,7 @@ mod ffi_gtk;
 mod ffi_x11;
 mod ffi_xfce;
 mod input;
+mod launchers;
 mod layout;
 mod menu;
 mod plugin_abi;

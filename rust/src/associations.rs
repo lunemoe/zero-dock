@@ -68,6 +68,16 @@ impl Dock {
     ) -> Result<(), glib::Error> {
         let key = association_key(window);
         if let Some(path) = path {
+            if key
+                .as_ref()
+                .is_some_and(|key| !self.associations.contains_key(key))
+                && self.associations.len() >= 512
+            {
+                return Err(glib::Error::new(
+                    gio::IOErrorEnum::NoSpace,
+                    &t("手动关联已达 512 条，请先删除不再使用的关联。"),
+                ));
+            }
             let usable = key.is_some()
                 && is_absolute_desktop_path(path)
                 && gio::DesktopAppInfo::from_filename(path).is_some();
@@ -88,9 +98,15 @@ impl Dock {
             _ => {}
         }
         self.app_generation += 1;
-        self.save();
+        self.refresh_launcher_manager();
         self.queue_refresh();
-        Ok(())
+        if self.save() {
+            Ok(())
+        } else {
+            Err(self.save_error.clone().unwrap_or_else(|| {
+                glib::Error::new(gio::IOErrorEnum::Failed, &t("配置尚未保存。"))
+            }))
+        }
     }
 
     pub fn association_clear(&mut self, button_id: u64) {

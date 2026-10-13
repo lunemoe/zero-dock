@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1 — 2026-10-13
+
+- Adapt the icon area to content and actual panel allocation, with automatic overflow and expansion in both orientations; migrate old reserved-slot and icon-limit settings.
+- Fix negative window-cycle indices for multi-step smooth scrolling and retain full actions and status for hidden windows.
+- Accept desktop-file drops across the plugin and add searchable native app selection, pin/rule management and in-place launcher replacement.
+- Report unsaved configuration changes, retry writes automatically or manually, and propagate association save failures.
+- Reject invalid and excessive restores before replacing configuration; retain all 512 valid association entries.
+- Apply middle-click preferences to previews and extend privacy-preserving runtime diagnostics.
+- Add adaptive/reliability regression scenarios, UI snapshot capture and duration-based stress up to 24 hours; refresh the Rust testing documentation and English translations.
+- Scope instance reloads to their owning panel session and respect XDG configuration and state directories.
+
 ## 0.3.0 — 2026-10-12
 
 - Rewrite the panel plugin from C to Rust. The cdylib exports the XFCE module entry point directly; `unsafe` is confined to five FFI modules under a crate-root `#![deny(unsafe_code)]`, and every behavior module builds with zero `unsafe`.

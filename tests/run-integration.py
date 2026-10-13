@@ -19,6 +19,7 @@ CORE = (
     "identity-workspaces",
     "improvements",
     "preview-pixels",
+    "adaptive-reliability",
 )
 
 WAYLAND_HOST_VARIABLES = (
@@ -150,11 +151,15 @@ def main():
     parser.add_argument("--scale", type=int, choices=(1, 2), default=1)
     parser.add_argument("--geometry", default="1280x900")
     parser.add_argument("--stress-cycles", type=int, default=5)
+    parser.add_argument("--stress-seconds", type=int, default=0,
+                        help="Run stress for this duration instead of a cycle count (0–86400)")
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if not 1 <= args.stress_cycles <= 100:
         parser.error("stress cycles must be between 1 and 100")
+    if not 0 <= args.stress_seconds <= 86400:
+        parser.error("stress seconds must be between 0 and 86400")
     if "x" not in args.geometry:
         parser.error("Geometry must be WIDTHxHEIGHT")
 
@@ -179,6 +184,7 @@ def main():
             env.update(
                 XDG_CONFIG_HOME=temporary,
                 XDG_CACHE_HOME=temporary,
+                XDG_DATA_HOME=str(Path(temporary) / "data"),
                 NO_AT_BRIDGE="1",
                 GIO_USE_VFS="local",
                 GDK_SCALE=str(args.scale),
@@ -199,6 +205,8 @@ def main():
                 args.geometry,
                 "--stress-cycles",
                 str(args.stress_cycles),
+                "--stress-seconds",
+                str(args.stress_seconds),
             ]
             for scenario in args.scenario or ():
                 command.extend(["--scenario", scenario])
@@ -241,6 +249,7 @@ def main():
             DISPLAY=":" + display,
             ZERO_DOCK_TEST_BUILD=str(build),
             ZERO_DOCK_STRESS_CYCLES=str(args.stress_cycles),
+            ZERO_DOCK_STRESS_SECONDS=str(args.stress_seconds),
         )
         env.pop("XAUTHORITY", None)
         env.pop("SESSION_MANAGER", None)
@@ -300,7 +309,7 @@ def main():
         test_env["G_DEBUG"] = "fatal-warnings"
         for scenario in scenarios:
             print(f"--- isolated scenario: {scenario} ---", flush=True)
-            timeout = 90 if scenario == "stress" else 45
+            timeout = max(90, args.stress_seconds + 60) if scenario == "stress" else 45
             if scenario == "audio-recovery":
                 timeout = 30
             if scenario == "real-apps":

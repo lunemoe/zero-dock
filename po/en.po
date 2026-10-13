@@ -5,9 +5,9 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: zero-dock 0.3.0\n"
+"Project-Id-Version: zero-dock 0.3.1\n"
 "Report-Msgid-Bugs-To: https://github.com/lunemoe/zero-dock/issues\n"
-"POT-Creation-Date: 2026-10-01 11:53+0800\n"
+"POT-Creation-Date: 2026-10-13 17:34+0800\n"
 "PO-Revision-Date: 2026-10-01 11:00+0800\n"
 "Last-Translator: Zero Dock contributors\n"
 "Language-Team: English\n"
@@ -17,369 +17,52 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/plugin.c:325
-msgid "Zero Dock 窗口停靠"
-msgstr "Zero Dock Window Dock"
-
-#: src/plugin.c:327
-msgid ""
-"XFCE 原生面板插件 · C / GTK3 / X11\n"
-"独立窗口、固定应用、预览与应用音量控制"
-msgstr ""
-"Native XFCE panel plugin · C / GTK3 / X11\n"
-"Independent windows, pinned apps, previews and application audio"
-
-#: src/plugin.c:381
-msgid "Zero Dock 需要 X11"
-msgstr "Zero Dock requires X11"
-
-#: src/apps.c:158
-msgid "启动请求已发送，但未检测到新窗口。可再次点击重试。"
-msgstr ""
-"Launch requested, but no new window was detected. Click again to retry."
-
-#: src/apps.c:201
+#: rust/src/apps.rs:214
 msgid "启动器文件已失效，请重新拖入该应用的 .desktop 文件。"
 msgstr ""
 "The launcher file is unavailable. Drop the application’s .desktop file onto "
 "the dock again."
 
-#: src/apps.c:220
-#, c-format
+#: rust/src/apps.rs:289
 msgid "无法启动应用：%s"
 msgstr "Unable to launch application: %s"
 
-#: src/settings.c:22
-msgid "配置文件无法读取，已保留原文件备份并使用默认设置。"
+#: rust/src/apps.rs:330
+msgid "启动请求已发送，但未检测到新窗口。可再次点击重试。"
 msgstr ""
-"The configuration could not be read. A backup was saved and defaults are in "
-"use."
+"Launch requested, but no new window was detected. Click again to retry."
 
-#: src/settings.c:23
-msgid "配置文件无法读取，设置暂不保存。请修复配置后重新加载插件。"
-msgstr ""
-"The configuration could not be read. Saving is disabled. Repair it and "
-"reload the plugin."
+#: rust/src/associations.rs:78
+msgid "手动关联已达 512 条，请先删除不再使用的关联。"
+msgstr "The limit of 512 manual associations has been reached. Remove unused associations first."
 
-#: src/settings.c:113
-msgid "Zero Dock 提示"
-msgstr "Zero Dock"
-
-#: src/settings.c:179 src/settings.c:460
-msgid "导出诊断信息"
-msgstr "Export diagnostics"
-
-#: src/settings.c:180 src/settings.c:347 src/associations.c:105
-msgid "取消"
-msgstr "Cancel"
-
-#: src/settings.c:180 src/settings.c:347
-msgid "保存"
-msgstr "Save"
-
-#: src/settings.c:201
-msgid "当前配置不可保存，请先修复配置文件。"
-msgstr ""
-"The current configuration cannot be saved. Repair the configuration file "
-"first."
-
-#: src/settings.c:206
-msgid "无法保存当前配置，未创建备份。"
-msgstr "The current configuration could not be saved. No backup was created."
-
-#: src/settings.c:223
-msgid "配置必须是小于 1 MiB 的普通文件。"
-msgstr "Configuration must be a regular file smaller than 1 MiB."
-
-#: src/settings.c:268
-msgid "所选文件不是有效的 Zero Dock 配置。"
-msgstr "The selected file is not a valid Zero Dock configuration."
-
-#: src/settings.c:344
-msgid "恢复 Zero Dock 配置"
-msgstr "Restore Zero Dock configuration"
-
-#: src/settings.c:344
-msgid "备份 Zero Dock 配置"
-msgstr "Back up Zero Dock configuration"
-
-#: src/settings.c:347
-msgid "恢复"
-msgstr "Restore"
-
-#: src/settings.c:356
-msgid "恢复固定应用、手动关联与设置；恢复前自动备份当前配置。"
-msgstr ""
-"Restore pinned apps, manual associations and settings. The current "
-"configuration is backed up before restoring."
-
-#: src/settings.c:357
-msgid "备份包含固定启动器和手动关联的本机文件路径。"
-msgstr ""
-"The backup includes local paths for pinned launchers and manual associations."
-
-#: src/settings.c:372
-msgid "Zero Dock 设置"
-msgstr "Zero Dock preferences"
-
-#: src/settings.c:372
-msgid "关闭"
-msgstr "Close"
-
-#: src/settings.c:396
-msgid "显示可点击的窗口预览"
-msgstr "Show clickable window previews"
-
-#: src/settings.c:396
-msgid "同应用多窗口显示序号"
-msgstr "Number multiple windows of the same app"
-
-#: src/settings.c:397
-msgid "显示所有工作区的窗口"
-msgstr "Show windows from all workspaces"
-
-#: src/settings.c:397
-msgid "滚轮切换窗口"
-msgstr "Use the scroll wheel to switch windows"
-
-#: src/settings.c:408
-msgid "预留图标位置（0 为自动宽度）"
-msgstr "Reserved icon slots (0 for automatic width)"
-
-#: src/settings.c:409
-msgid "预览宽度（像素）"
-msgstr "Preview width (pixels)"
-
-#: src/settings.c:410
-msgid "悬停延时（毫秒）"
-msgstr "Hover delay (milliseconds)"
-
-#: src/settings.c:411
-msgid "预览刷新间隔（毫秒）"
-msgstr "Preview refresh interval (milliseconds)"
-
-#: src/settings.c:412
-msgid "启动等待时间（毫秒）"
-msgstr "Launch wait timeout (milliseconds)"
-
-#: src/settings.c:413
-msgid "最多显示图标数（含溢出按钮，0 为不限）"
-msgstr "Maximum visible icons (including overflow; 0 for unlimited)"
-
-#: src/settings.c:430
-msgid "左键行为"
-msgstr "Left click action"
-
-#: src/settings.c:430
-msgid "中键行为"
-msgstr "Middle click action"
-
-#: src/settings.c:431
-msgid "激活 / 最小化"
-msgstr "Activate / minimize"
-
-#: src/settings.c:431
-msgid "仅激活"
-msgstr "Activate only"
-
-#: src/settings.c:432 src/menu.c:202 src/menu.c:241
-msgid "启动新窗口"
-msgstr "Launch new window"
-
-#: src/settings.c:432 src/menu.c:214 src/preview.c:366 src/preview.c:368
-msgid "关闭窗口"
-msgstr "Close window"
-
-#: src/settings.c:432
-msgid "不操作"
-msgstr "Do nothing"
-
-#: src/settings.c:449
-msgid "备份配置…"
-msgstr "Back up configuration…"
-
-#: src/settings.c:449
-msgid "恢复配置…"
-msgstr "Restore configuration…"
-
-#: src/settings.c:459
-msgid "恢复默认设置（保留固定应用）"
-msgstr "Restore defaults (keep pinned apps)"
-
-#: src/settings.c:466
-msgid ""
-"固定图标复用首个窗口，其他窗口独立显示。\n"
-"拖入 .desktop 文件可固定应用。\n"
-"喇叭滚轮调整应用音量，最高 200%。\n"
-"预览画面仅保存在内存中。"
-msgstr ""
-"The first window reuses its pinned icon; other windows stay separate.\n"
-"Drop .desktop files to pin apps.\n"
-"Scroll over a speaker to adjust app volume, up to 200%.\n"
-"Preview frames stay in memory."
-
-#: src/buttons.c:605
-msgid "取消应用静音 · 滚轮调音量"
-msgstr "Unmute app · Scroll to adjust volume"
-
-#: src/buttons.c:606
-msgid "应用静音 · 滚轮调音量"
-msgstr "Mute app · Scroll to adjust volume"
-
-#: src/buttons.c:668 src/layout.c:94
-msgid "启动器文件已失效"
-msgstr "Launcher file unavailable"
-
-#: src/buttons.c:669
-msgid "正在启动…"
-msgstr "Launching…"
-
-#: src/menu.c:130 src/menu.c:131 src/layout.c:98 src/layout.c:99
-msgid "无标题窗口"
-msgstr "Untitled window"
-
-#: src/menu.c:143
-msgid "本应用的窗口"
-msgstr "Windows of this app"
-
-#: src/menu.c:161
-msgid "恢复窗口"
-msgstr "Restore window"
-
-#: src/menu.c:161
-msgid "最小化"
-msgstr "Minimize"
-
-#: src/menu.c:165
-msgid "还原大小"
-msgstr "Unmaximize"
-
-#: src/menu.c:165
-msgid "最大化"
-msgstr "Maximize"
-
-#: src/menu.c:169
-msgid "退出全屏"
-msgstr "Leave fullscreen"
-
-#: src/menu.c:169
-msgid "全屏"
-msgstr "Fullscreen"
-
-#: src/menu.c:173
-msgid "取消置顶"
-msgstr "Disable always on top"
-
-#: src/menu.c:173
-msgid "置顶"
-msgstr "Always on top"
-
-#: src/menu.c:177
-msgid "移到工作区"
-msgstr "Move to workspace"
-
-#: src/menu.c:188
-#, c-format
-msgid "工作区 %u"
-msgstr "Workspace %u"
-
-#: src/menu.c:200 src/preview.c:286
-msgid "取消应用静音"
-msgstr "Unmute application"
-
-#: src/menu.c:200 src/preview.c:286
-msgid "应用静音"
-msgstr "Mute application"
-
-#: src/menu.c:205 src/menu.c:254
-msgid "取消固定"
-msgstr "Unpin"
-
-#: src/menu.c:205
-msgid "固定到启动器"
-msgstr "Pin to dock"
-
-#: src/menu.c:208
-msgid "关联到应用…"
-msgstr "Associate with application…"
-
-#: src/menu.c:210
-msgid "清除手动关联"
-msgstr "Clear manual association"
-
-#: src/menu.c:246
-msgid "向左移动"
-msgstr "Move left"
-
-#: src/menu.c:247
-msgid "向上移动"
-msgstr "Move up"
-
-#: src/menu.c:250
-msgid "向右移动"
-msgstr "Move right"
-
-#: src/menu.c:251
-msgid "向下移动"
-msgstr "Move down"
-
-#: src/menu.c:287
-msgid "显示桌面"
-msgstr "Show desktop"
-
-#: src/menu.c:292
-msgid "最小化所有窗口"
-msgstr "Minimize all windows"
-
-#: src/preview.c:313
-msgid "已最小化 · 最后一帧"
-msgstr "Minimized · Last frame"
-
-#: src/preview.c:314
-msgid "点击预览切换窗口"
-msgstr "Click preview to activate window"
-
-#: src/preview.c:318
-msgid "暂无可用画面 · 点击恢复窗口"
-msgstr "No frame available · Click to restore window"
-
-#: src/preview.c:326
-msgid "所有工作区"
-msgstr "All workspaces"
-
-#: src/preview.c:435
-#, c-format
-msgid "应用已静音 · %u%%"
-msgstr "Application muted · %u%%"
-
-#: src/preview.c:435
-#, c-format
-msgid "应用音量 %u%%"
-msgstr "Application volume %u%%"
-
-#: src/associations.c:57
+#: rust/src/associations.rs:87
 msgid "窗口缺少可保存的窗口类，或所选桌面文件无效。"
 msgstr ""
 "The window has no reusable class, or the selected desktop file is invalid."
 
-#: src/associations.c:88
-msgid "窗口已关闭，请为仍在运行的窗口设置关联。"
-msgstr ""
-"The window has closed. Set an association for a window that is still running."
+#: rust/src/associations.rs:107 rust/src/launchers.rs:195
+msgid "配置尚未保存。"
+msgstr "The configuration has not been saved."
 
-#: src/associations.c:104
+#: rust/src/associations.rs:126
 msgid "选择关联应用的桌面文件"
 msgstr "Select the application desktop file"
 
-#: src/associations.c:105
+#: rust/src/associations.rs:130 rust/src/launchers.rs:117
+#: rust/src/settings.rs:742 rust/src/settings.rs:797
+msgid "取消"
+msgstr "Cancel"
+
+#: rust/src/associations.rs:131
 msgid "关联"
 msgstr "Associate"
 
-#: src/associations.c:107
+#: rust/src/associations.rs:135 rust/src/launchers.rs:123
 msgid "应用启动器 (*.desktop)"
 msgstr "Application launchers (*.desktop)"
 
-#: src/associations.c:113
+#: rust/src/associations.rs:141
 msgid ""
 "此规则适用于相同窗口类的所有窗口。\n"
 "窗口类完全相同的多配置应用仍需要应用自身提供不同身份。"
@@ -388,7 +71,469 @@ msgstr ""
 "Profiles with identical window classes still need distinct identities from "
 "the application."
 
-#: src/layout.c:46
-#, c-format
+#: rust/src/associations.rs:161
+msgid "窗口已关闭，请为仍在运行的窗口设置关联。"
+msgstr ""
+"The window has closed. Set an association for a window that is still running."
+
+#: rust/src/layout.rs:187 rust/src/layout.rs:411
 msgid "更多窗口与启动器（%u）"
 msgstr "More windows and launchers (%u)"
+
+#: rust/src/layout.rs:274
+msgid "已最小化"
+msgstr "Minimized"
+
+#: rust/src/layout.rs:304
+msgid "点击切换或启动；右键或 Shift+F10 打开操作。"
+msgstr "Click to switch or launch; right-click or press Shift+F10 for actions."
+
+#: rust/src/layout.rs:413
+msgid "活动窗口位于更多菜单中"
+msgstr "The active window is in the overflow menu"
+
+#: rust/src/layout.rs:416
+msgid "有窗口请求注意"
+msgstr "A hidden window needs attention"
+
+#: rust/src/layout.rs:419
+msgid "有应用音频"
+msgstr "A hidden application has audio"
+
+#: rust/src/launchers.rs:38
+msgid "更换固定应用"
+msgstr "Replace pinned application"
+
+#: rust/src/launchers.rs:40
+msgid "添加固定应用"
+msgstr "Add pinned application"
+
+#: rust/src/launchers.rs:42
+msgid "选择应用，或选择本机的桌面文件。"
+msgstr "Choose an application or a local desktop file."
+
+#: rust/src/launchers.rs:49
+msgid "选择桌面文件…"
+msgstr "Choose desktop file…"
+
+#: rust/src/launchers.rs:55
+msgid "更换"
+msgstr "Replace"
+
+#: rust/src/launchers.rs:57
+msgid "固定"
+msgstr "Pin"
+
+#: rust/src/launchers.rs:113
+msgid "选择应用的桌面文件"
+msgstr "Choose application desktop file"
+
+#: rust/src/launchers.rs:118
+msgid "选择"
+msgstr "Choose"
+
+#: rust/src/launchers.rs:136 rust/src/launchers.rs:164
+msgid "所选桌面文件无效。"
+msgstr "The selected desktop file is invalid."
+
+#: rust/src/launchers.rs:172
+msgid "此应用已固定，请选择其他应用。"
+msgstr "This application is already pinned. Choose another application."
+
+#: rust/src/launchers.rs:178
+msgid "固定应用已移除。"
+msgstr "The pinned application has been removed."
+
+#: rust/src/launchers.rs:206
+msgid "固定应用与关联"
+msgstr "Pinned applications and associations"
+
+#: rust/src/launchers.rs:209 rust/src/settings.rs:451
+msgid "关闭"
+msgstr "Close"
+
+#: rust/src/launchers.rs:223 rust/src/dock.rs:654 rust/src/dock.rs:657
+msgid "添加固定应用…"
+msgstr "Add pinned application…"
+
+#: rust/src/launchers.rs:234
+msgid "固定应用"
+msgstr "Pinned applications"
+
+#: rust/src/launchers.rs:234
+msgid "手动关联"
+msgstr "Manual associations"
+
+#: rust/src/launchers.rs:273
+msgid "暂无固定应用"
+msgstr "No pinned applications"
+
+#: rust/src/launchers.rs:282
+msgid "失效的固定应用"
+msgstr "Unavailable pinned application"
+
+#: rust/src/launchers.rs:311
+msgid "向后移动"
+msgstr "Move later"
+
+#: rust/src/launchers.rs:313
+msgid "向前移动"
+msgstr "Move earlier"
+
+#: rust/src/launchers.rs:323
+msgid "更换…"
+msgstr "Replace…"
+
+#: rust/src/launchers.rs:331 rust/src/menu.rs:345 rust/src/menu.rs:452
+msgid "取消固定"
+msgstr "Unpin"
+
+#: rust/src/launchers.rs:350
+msgid "暂无手动关联"
+msgstr "No manual associations"
+
+#: rust/src/launchers.rs:356
+msgid "失效的关联应用"
+msgstr "Unavailable associated application"
+
+#: rust/src/launchers.rs:365
+msgid "当前没有匹配窗口"
+msgstr "No matching window is currently open"
+
+#: rust/src/launchers.rs:372
+msgid "删除关联"
+msgstr "Remove association"
+
+#: rust/src/menu.rs:174 rust/src/button.rs:171
+msgid "无标题窗口"
+msgstr "Untitled window"
+
+#: rust/src/menu.rs:202
+msgid "本应用的窗口"
+msgstr "Windows of this app"
+
+#: rust/src/menu.rs:227
+msgid "恢复窗口"
+msgstr "Restore window"
+
+#: rust/src/menu.rs:229
+msgid "最小化"
+msgstr "Minimize"
+
+#: rust/src/menu.rs:243
+msgid "还原大小"
+msgstr "Unmaximize"
+
+#: rust/src/menu.rs:245
+msgid "最大化"
+msgstr "Maximize"
+
+#: rust/src/menu.rs:258
+msgid "退出全屏"
+msgstr "Leave fullscreen"
+
+#: rust/src/menu.rs:258
+msgid "全屏"
+msgstr "Fullscreen"
+
+#: rust/src/menu.rs:271
+msgid "取消置顶"
+msgstr "Disable always on top"
+
+#: rust/src/menu.rs:273
+msgid "置顶"
+msgstr "Always on top"
+
+#: rust/src/menu.rs:287
+msgid "移到工作区"
+msgstr "Move to workspace"
+
+#: rust/src/menu.rs:300
+msgid "工作区 %u"
+msgstr "Workspace %u"
+
+#: rust/src/menu.rs:327 rust/src/preview.rs:392
+msgid "取消应用静音"
+msgstr "Unmute application"
+
+#: rust/src/menu.rs:329 rust/src/preview.rs:394
+msgid "应用静音"
+msgstr "Mute application"
+
+#: rust/src/menu.rs:332 rust/src/menu.rs:415 rust/src/settings.rs:592
+msgid "启动新窗口"
+msgstr "Launch new window"
+
+#: rust/src/menu.rs:347
+msgid "固定到启动器"
+msgstr "Pin to dock"
+
+#: rust/src/menu.rs:357
+msgid "关联到应用…"
+msgstr "Associate with application…"
+
+#: rust/src/menu.rs:361
+msgid "清除手动关联"
+msgstr "Clear manual association"
+
+#: rust/src/menu.rs:370 rust/src/preview.rs:234 rust/src/preview.rs:236
+#: rust/src/settings.rs:592
+msgid "关闭窗口"
+msgstr "Close window"
+
+#: rust/src/menu.rs:428
+msgid "向左移动"
+msgstr "Move left"
+
+#: rust/src/menu.rs:430
+msgid "向上移动"
+msgstr "Move up"
+
+#: rust/src/menu.rs:440
+msgid "向右移动"
+msgstr "Move right"
+
+#: rust/src/menu.rs:442
+msgid "向下移动"
+msgstr "Move down"
+
+#: rust/src/menu.rs:488
+msgid "显示桌面"
+msgstr "Show desktop"
+
+#: rust/src/menu.rs:517
+msgid "最小化所有窗口"
+msgstr "Minimize all windows"
+
+#: rust/src/preview.rs:441
+msgid "已最小化 · 最后一帧"
+msgstr "Minimized · Last frame"
+
+#: rust/src/preview.rs:443
+msgid "点击预览切换窗口"
+msgstr "Click preview to activate window"
+
+#: rust/src/preview.rs:446
+msgid "暂无可用画面 · 点击恢复窗口"
+msgstr "No frame available · Click to restore window"
+
+#: rust/src/preview.rs:458
+msgid "所有工作区"
+msgstr "All workspaces"
+
+#: rust/src/preview.rs:495
+msgid "应用已静音 · %u%%"
+msgstr "Application muted · %u%%"
+
+#: rust/src/preview.rs:499
+msgid "应用音量 %u%%"
+msgstr "Application volume %u%%"
+
+#: rust/src/settings.rs:95
+msgid "尚未保存：%s"
+msgstr "Not saved: %s"
+
+#: rust/src/settings.rs:115
+msgid "配置文件无法读取，已保留原文件备份并使用默认设置。"
+msgstr ""
+"The configuration could not be read. A backup was saved and defaults are in "
+"use."
+
+#: rust/src/settings.rs:117
+msgid "配置文件无法读取，设置暂不保存。请修复配置后重新加载插件。"
+msgstr ""
+"The configuration could not be read. Saving is disabled. Repair it and "
+"reload the plugin."
+
+#: rust/src/settings.rs:142
+msgid "Zero Dock 提示"
+msgstr "Zero Dock"
+
+#: rust/src/settings.rs:219
+msgid "当前配置不可保存，请先修复配置文件。"
+msgstr ""
+"The current configuration cannot be saved. Repair the configuration file "
+"first."
+
+#: rust/src/settings.rs:225
+msgid "无法保存当前配置，未创建备份。"
+msgstr "The current configuration could not be saved. No backup was created."
+
+#: rust/src/settings.rs:238 rust/src/settings.rs:244
+msgid "配置必须是小于 1 MiB 的普通文件。"
+msgstr "Configuration must be a regular file smaller than 1 MiB."
+
+#: rust/src/settings.rs:253 rust/src/settings.rs:303
+msgid "所选文件不是有效的 Zero Dock 配置。"
+msgstr "The selected file is not a valid Zero Dock configuration."
+
+#: rust/src/settings.rs:448
+msgid "Zero Dock 设置"
+msgstr "Zero Dock preferences"
+
+#: rust/src/settings.rs:481
+msgid "重试保存"
+msgstr "Retry saving"
+
+#: rust/src/settings.rs:501
+msgid "显示可点击的窗口预览"
+msgstr "Show clickable window previews"
+
+#: rust/src/settings.rs:502
+msgid "同应用多窗口显示序号"
+msgstr "Number multiple windows of the same app"
+
+#: rust/src/settings.rs:503
+msgid "显示所有工作区的窗口"
+msgstr "Show windows from all workspaces"
+
+#: rust/src/settings.rs:504
+msgid "滚轮切换窗口"
+msgstr "Use the scroll wheel to switch windows"
+
+#: rust/src/settings.rs:527
+msgid "预览宽度（像素）"
+msgstr "Preview width (pixels)"
+
+#: rust/src/settings.rs:534
+msgid "悬停延时（毫秒）"
+msgstr "Hover delay (milliseconds)"
+
+#: rust/src/settings.rs:541
+msgid "预览刷新间隔（毫秒）"
+msgstr "Preview refresh interval (milliseconds)"
+
+#: rust/src/settings.rs:548
+msgid "启动等待时间（毫秒）"
+msgstr "Launch wait timeout (milliseconds)"
+
+#: rust/src/settings.rs:585
+msgid "左键行为"
+msgstr "Left click action"
+
+#: rust/src/settings.rs:587
+msgid "激活 / 最小化"
+msgstr "Activate / minimize"
+
+#: rust/src/settings.rs:587
+msgid "仅激活"
+msgstr "Activate only"
+
+#: rust/src/settings.rs:590
+msgid "中键行为"
+msgstr "Middle click action"
+
+#: rust/src/settings.rs:592
+msgid "不操作"
+msgstr "Do nothing"
+
+#: rust/src/settings.rs:620
+msgid "管理固定应用与关联…"
+msgstr "Manage pinned applications and associations…"
+
+#: rust/src/settings.rs:628
+msgid "备份配置…"
+msgstr "Back up configuration…"
+
+#: rust/src/settings.rs:628
+msgid "恢复配置…"
+msgstr "Restore configuration…"
+
+#: rust/src/settings.rs:643
+msgid "恢复默认设置（保留固定应用）"
+msgstr "Restore defaults (keep pinned apps)"
+
+#: rust/src/settings.rs:644 rust/src/settings.rs:738
+msgid "导出诊断信息"
+msgstr "Export diagnostics"
+
+#: rust/src/settings.rs:666
+msgid ""
+"固定图标复用首个窗口，其他窗口独立显示。\n"
+"长度随内容和面板空间自动调整，空间不足时显示更多菜单。\n"
+"拖入 .desktop 文件或选择应用即可固定。\n"
+"图标和预览共用中键设置。\n"
+"喇叭滚轮调整应用音量，最高 200%。\n"
+"预览画面仅保存在内存中。"
+msgstr ""
+"The first window reuses its pinned icon; other windows stay separate.\n"
+"The icon area adapts to its contents and panel space, with an overflow menu "
+"when needed.\n"
+"Drop a .desktop file or choose an application to pin it.\n"
+"Icons and previews share the middle-click setting.\n"
+"Scroll over a speaker to adjust app volume, up to 200%.\n"
+"Preview frames stay in memory."
+
+#: rust/src/settings.rs:743 rust/src/settings.rs:789
+msgid "保存"
+msgstr "Save"
+
+#: rust/src/settings.rs:781
+msgid "恢复 Zero Dock 配置"
+msgstr "Restore Zero Dock configuration"
+
+#: rust/src/settings.rs:783
+msgid "恢复"
+msgstr "Restore"
+
+#: rust/src/settings.rs:787
+msgid "备份 Zero Dock 配置"
+msgstr "Back up Zero Dock configuration"
+
+#: rust/src/settings.rs:806
+msgid "恢复固定应用、手动关联与设置；恢复前自动备份当前配置。"
+msgstr ""
+"Restore pinned apps, manual associations and settings. The current "
+"configuration is backed up before restoring."
+
+#: rust/src/settings.rs:808
+msgid "备份包含固定启动器和手动关联的本机文件路径。"
+msgstr ""
+"The backup includes local paths for pinned launchers and manual associations."
+
+#: rust/src/button.rs:176
+msgid "启动器文件已失效"
+msgstr "Launcher file unavailable"
+
+#: rust/src/button.rs:1313
+msgid "正在启动…"
+msgstr "Launching…"
+
+#: rust/src/button.rs:1368
+msgid "取消应用静音 · 滚轮调音量"
+msgstr "Unmute app · Scroll to adjust volume"
+
+#: rust/src/button.rs:1370
+msgid "应用静音 · 滚轮调音量"
+msgstr "Mute app · Scroll to adjust volume"
+
+#: rust/src/dock.rs:165 rust/src/dock.rs:192
+msgid ""
+"配置尚未保存，当前修改仅在本次运行中生效。\n"
+"%s"
+msgstr ""
+"The configuration has not been saved. Current changes only apply to this "
+"running instance.\n"
+"%s"
+
+#: rust/src/dock.rs:217
+msgid "当前配置不可保存，请修复配置文件后重新加载插件。"
+msgstr ""
+"The current configuration cannot be saved. Repair the configuration file and "
+"reload the plugin."
+
+#: rust/src/dock.rs:589
+msgid "Zero Dock 窗口停靠"
+msgstr "Zero Dock Window Dock"
+
+#: rust/src/dock.rs:592
+msgid ""
+"XFCE 原生面板插件 · C / GTK3 / X11\n"
+"独立窗口、固定应用、预览与应用音量控制"
+msgstr ""
+"Native XFCE panel plugin · C / GTK3 / X11\n"
+"Independent windows, pinned apps, previews and application audio"
+
+#: rust/src/dock.rs:632
+msgid "Zero Dock 需要 X11"
+msgstr "Zero Dock requires X11"

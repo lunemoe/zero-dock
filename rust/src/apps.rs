@@ -182,6 +182,7 @@ impl Dock {
             }
         }
         self.queue_refresh();
+        self.refresh_launcher_manager();
     }
 }
 

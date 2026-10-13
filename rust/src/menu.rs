@@ -28,6 +28,14 @@ enum Action {
 }
 
 impl Dock {
+    pub fn button_menu(&mut self, button_id: u64, event: Option<&gdk::Event>) {
+        if self.button(button_id).is_some_and(|b| b.window.is_some()) {
+            self.window_menu(button_id, event);
+        } else {
+            self.pin_menu(button_id, event);
+        }
+    }
+
     fn run_action(&mut self, action: Action, button_id: u64) {
         if self.button(button_id).is_none() {
             return; // button was freed: no-op (C checked b->closed)
@@ -361,9 +369,13 @@ impl Dock {
         menu.append(&gtk::SeparatorMenuItem::new());
         let close_label = t("关闭窗口");
         self.add_item(&menu, &close_label, Action::Close, true, button_id);
-        let anchor = self
-            .button(button_id)
-            .map(|b| b.main.clone().upcast::<gtk::Widget>());
+        let anchor = self.button(button_id).map(|b| {
+            if b.widget.is_visible() {
+                b.main.clone().upcast::<gtk::Widget>()
+            } else {
+                self.overflow.clone().upcast()
+            }
+        });
         match anchor {
             Some(anchor) => self.popup_menu_at(&menu, Some(&anchor), event),
             None => self.popup_menu_at(&menu, None, event),
@@ -439,9 +451,13 @@ impl Dock {
         menu.append(&gtk::SeparatorMenuItem::new());
         let unpin_label = t("取消固定");
         self.add_item(&menu, &unpin_label, Action::Unpin, true, button_id);
-        let anchor = self
-            .button(button_id)
-            .map(|b| b.main.clone().upcast::<gtk::Widget>());
+        let anchor = self.button(button_id).map(|b| {
+            if b.widget.is_visible() {
+                b.main.clone().upcast::<gtk::Widget>()
+            } else {
+                self.overflow.clone().upcast()
+            }
+        });
         match anchor {
             Some(anchor) => self.popup_menu_at(&menu, Some(&anchor), event),
             None => self.popup_menu_at(&menu, None, event),

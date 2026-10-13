@@ -108,14 +108,12 @@ fn invalid_settings() {
     settings.load(&file);
     assert!(settings.previews);
     assert!(!settings.numbers);
-    assert_eq!(settings.slots, 0);
     assert_eq!(settings.preview_width, 300);
     assert_eq!(settings.preview_delay, 2000);
     assert_eq!(settings.preview_interval, 200);
     assert_eq!(settings.launch_timeout, 10000);
     assert_eq!(settings.left_action, 0);
     assert_eq!(settings.middle_action, 2);
-    assert_eq!(settings.max_visible, 0);
     assert!(settings.scroll_windows);
 }
 
@@ -401,8 +399,6 @@ fn settings_round_trip() {
         preview_delay: 700,
         preview_interval: 900,
         launch_timeout: 15000,
-        slots: 5,
-        max_visible: 24,
         left_action: 1,
         middle_action: 2,
     };
@@ -428,9 +424,36 @@ fn settings_round_trip() {
     settings.load(&clamped);
     assert_eq!(settings.preview_width, 600);
     assert_eq!(settings.preview_delay, 100);
-    assert_eq!(settings.slots, 32);
-    assert_eq!(settings.max_visible, 64);
     assert_eq!(settings.middle_action, 2);
+}
+
+#[test]
+fn legacy_layout_is_migrated() {
+    let file = KeyFile::new();
+    file.load_from_data(
+        "[Dock]\nSlots=10\nMaxVisible=16\nCustomKey=keep\n",
+        glib::KeyFileFlags::NONE,
+    )
+    .unwrap();
+    let mut settings = Settings::default();
+    settings.load(&file);
+    settings.save(&file);
+    assert!(!file.has_key("Dock", "Slots").unwrap());
+    assert!(!file.has_key("Dock", "MaxVisible").unwrap());
+    assert_eq!(file.string("Dock", "CustomKey").unwrap(), "keep");
+}
+
+#[test]
+fn adaptive_layout_fits_actual_space() {
+    use crate::layout::{content_length, visible_capacity};
+    assert_eq!(content_length(48, 0), 48);
+    assert_eq!(content_length(48, 3), 148);
+    assert_eq!(visible_capacity(48, 48), 1);
+    assert_eq!(visible_capacity(97, 48), 1);
+    assert_eq!(visible_capacity(98, 48), 2);
+    assert_eq!(visible_capacity(147, 48), 2);
+    assert_eq!(visible_capacity(148, 48), 3);
+    assert_eq!(content_length(i32::MAX, u32::MAX), i32::MAX);
 }
 
 // ---------------------------------------------------------------------------

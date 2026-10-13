@@ -1,5 +1,14 @@
 # Zero Dock 验收记录
 
+## 0.3.1 自适应与可靠性修复
+
+- `meson setup build-adaptive --prefix=/usr --libdir=lib -Dtests=true --werror` 的发布构建通过；`meson test -C build-adaptive --print-errorlogs` 最终 7/7 通过，包含 24 项 Rust 单元检查、生命周期、7 条核心行为路径、2 倍缩放、压力、真实外部 wrapper 和私有音频恢复。
+- 新增自适应路径在均匀 1 倍及 2 倍缩放下通过：旧长度设置迁移、空白区域真实拖入、原生应用搜索、按实际分配横竖收缩/重新展开、单槽溢出、隐藏窗口右键操作和活动/注意/音频提示、预览中键不操作/关闭、启动器原位替换与关联管理。
+- 513 条关联恢复被拒绝且原文件不变，512 条有效关联全部保留；保存失败有错误和未保存状态，关联不报告保存成功，目标目录恢复后自动重试成功并清除未保存状态。诊断检查保持不含个人路径。
+- Chrome 临时配置与隔离 Thunar 的双窗口生命周期通过。60 秒压力完成 59 轮、1,888 次窗口创建/关闭；RSS 预热 62,524 KiB、结束 65,268 KiB，空闲 CPU 0.65%。这是本机短期样本。
+- `cargo fmt --check`、含 test-harness 的 `cargo clippy --all-targets -- -D warnings`、Python 语法、`git diff --check` 和 gettext 检查通过，119 条英文译文完整。应用选择、固定管理、溢出与自适应图标区的合成界面截图已视觉核验；图片保留在临时目录。
+- 交付构建为 `dist/xfce4-zero-dock-plugin-0.3.1-1-x86_64.pkg.tar.zst`，对应源码归档为 `dist/zero-dock-0.3.1.tar.gz`。本轮没有执行 24 小时长跑、真实休眠唤醒、硬件热插拔或混合 DPI 验证；压力入口支持最长 24 小时运行。
+
 ## 0.3.0 Rust 重写验证
 
 2026-10-12，CachyOS、XFCE 4.20.8、GTK 3.24.52、X11、Rust 1.98.1，本机验证：

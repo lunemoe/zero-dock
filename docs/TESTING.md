@@ -9,12 +9,12 @@ meson setup build-dev --prefix=/usr --libdir=lib -Dtests=true --werror
 meson compile -C build-dev
 meson test -C build-dev --print-errorlogs
 cargo fmt --manifest-path rust/Cargo.toml --check
-cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
-G_DEBUG=fatal-warnings cargo test --manifest-path rust/Cargo.toml --all-targets
-python -m py_compile tests/run-isolated.py tools/*.py
+cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets --features test-harness -- -D warnings
+G_DEBUG=fatal-warnings cargo test --locked --manifest-path rust/Cargo.toml --all-targets --features test-harness
+python -m py_compile tests/*.py tools/*.py
 ```
 
-`meson test` always runs the Rust unit suite (19 tests). When `Xvfb`, `xfwm4` and `dbus-run-session` are installed it also runs the isolated GUI-host smoke test. The unit suite covers process ancestry, application matching and precedence, pin serialization/order, settings validation and round-trip, timer lifecycle, scroll accumulation, atomic private config writes, registration metadata and association helpers.
+`meson test` runs 24 Rust unit tests. With the installed X11/audio helpers it also runs lifecycle smoke, seven core behavior scenarios, scale-2 checks, window stress, external wrappers and private audio recovery. Unit coverage includes adaptive capacity boundaries and migration of old fixed-length keys in addition to matching, persistence, timers and scrolling. All harnesses isolate config, cache, data and D-Bus state; audio suites use disposable services and test streams.
 
 The unit suite is expected to pass with `G_DEBUG=fatal-warnings`. In particular, a one-shot `Timer` that has already returned `ControlFlow::Break` must be safe to query, clear or drop without producing a stale `g_source_remove()` GLib critical.
 
@@ -38,11 +38,23 @@ build-dev/zero-dock-test-host [rc-file] [seconds]
 G_DEBUG=fatal-warnings build-dev/zero-dock-test-host my.rc 20
 ```
 
-The host constructs a real `XfcePanelPlugin` object in a plain GTK window — the same object shape the panel wrapper creates. Use the manual path for interactions the smoke harness does not synthesize yet: pin/unpin, preview hover/click, window menus, drag-and-drop, audio controls, workspace changes and application-specific behavior.
+The host constructs a real `XfcePanelPlugin` object in a plain GTK window — the same object shape the panel wrapper creates. It is useful for exploratory interaction and application-specific checks; the behavior harness below already synthesizes the main window, drag, preview, menu, audio and workspace flows.
 
-## Remaining integration gap
+## Rust behavior and sustained stress
 
-The former C integration binaries (`zero-dock-integration`, `zero-dock-real-preview`, `zero-dock-inspect-apps`) poked directly into C internals and were removed with the Rust rewrite. The isolated Rust host now restores automated construction/disposal and fatal-warning regression coverage, but full behavioral parity is not restored yet. Dedicated Rust scenarios are still needed for pinned-window transfer, launch timeout/retry, identity/workspace rebinding, audio-server reconnection, preview pixel verification and long stress runs.
+```sh
+python tests/run-integration.py build-dev --suite core --private-audio
+python tests/run-integration.py build-dev --scenario adaptive-reliability --scale 2 --geometry 2048x1536 --private-audio
+python tests/run-integration.py build-dev --suite audio --private-audio
+python tests/run-integration.py build-dev --suite real-apps
+python tests/run-integration.py build-dev --suite stress --stress-seconds 60 --private-audio
+# Optional long run; this is an entry point, not evidence of a completed 24-hour test:
+python tests/run-integration.py build-dev --suite stress --stress-seconds 86400 --private-audio
+```
+
+Core scenarios cover native controls and real drag input, pin/window transfer, launch feedback, identity/workspaces, manual rules and config restoration, changing preview pixels, and adaptive/reliability regressions. The latter shrinks and expands actual GTK allocations horizontally and vertically, covers a single-position overflow, tests hidden-row context actions, preview middle-click settings, native app selection and launcher replacement, rejects 513-rule imports without changing the file, preserves all 512 valid rules, and verifies failed writes recover through automatic retry. `ZERO_DOCK_TEST_IMAGES=/tmp/zero-dock-images` optionally saves synthetic UI snapshots from this scenario for visual review.
+
+The stress duration is 0–86400 seconds; zero uses `--stress-cycles` instead. The runner adjusts its timeout to the chosen duration and reports cycle/window counts, warm/final RSS and idle CPU. Real-app scenarios use temporary Chrome profiles and isolated Thunar windows. These checks do not establish all browser profiles, Flatpak/Steam/Wine compatibility, hardware mixed DPI or suspend/resume behavior.
 
 ## Sanitizers
 

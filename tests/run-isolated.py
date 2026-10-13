@@ -83,6 +83,7 @@ def main():
             env.update(
                 XDG_CONFIG_HOME=temporary,
                 XDG_CACHE_HOME=temporary,
+                XDG_DATA_HOME=str(Path(temporary) / "data"),
                 NO_AT_BRIDGE="1",
                 GIO_USE_VFS="local",
                 GDK_SCALE=str(args.scale),

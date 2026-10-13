@@ -1,4 +1,4 @@
-project('zero-dock', version: '0.3.0', license: 'MIT', meson_version: '>=0.63.0',
+project('zero-dock', version: '0.3.1', license: 'MIT', meson_version: '>=0.63.0',
         default_options: ['buildtype=debugoptimized'])
 cargo = find_program('cargo')
 copy = find_program('cp')
@@ -23,6 +23,7 @@ rust_sources = files(
   'rust/src/ffi_xfce.rs',
   'rust/src/input.rs',
   'rust/src/layout.rs',
+  'rust/src/launchers.rs',
   'rust/src/menu.rs',
   'rust/src/preview.rs',
   'rust/src/settings.rs',

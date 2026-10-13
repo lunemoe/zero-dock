@@ -29,9 +29,16 @@ pub struct Dock {
     pub weak: DockWeak,
 
     // Widgets
-    pub container: gtk::Box,
+    pub container: crate::layout::AdaptiveBox,
     pub box_: gtk::Box,
     pub overflow: gtk::Button,
+    pub empty_launcher: gtk::Button,
+    pub launcher_dialog: Option<gtk::Dialog>,
+    pub launcher_list: Option<gtk::Box>,
+    pub association_list: Option<gtk::Box>,
+    pub application_dialog: Option<gtk::Dialog>,
+    pub save_status: Option<gtk::Box>,
+    pub save_status_label: Option<gtk::Label>,
     pub association_dialog: Option<gtk::FileChooserDialog>,
     pub settings_dialog: Option<gtk::Dialog>,
     pub menu: Option<gtk::Menu>,
@@ -65,6 +72,10 @@ pub struct Dock {
     pub settings: Settings,
     pub app_generation: u32,
     pub rc_path: Option<String>,
+    pub layout_length: i32,
+    pub save_error: Option<glib::Error>,
+    pub capture_attempts: u64,
+    pub capture_failures: u64,
 
     // Flags
     pub disposing: bool,
@@ -77,6 +88,7 @@ pub struct Dock {
     pub refresh_id: Timer,
     pub active_frame_id: Timer,
     pub launch_tick: Timer,
+    pub save_retry: Timer,
 
     // Drag / hover state
     pub identity_atoms: [Atom; 4],
@@ -144,8 +156,66 @@ impl Dock {
     }
 
     pub fn save(&mut self) -> bool {
-        if self.disposing || self.rc_path.is_none() || self.save_blocked {
+        if self.disposing {
             return false;
+        }
+        match self.try_save() {
+            Ok(()) => {
+                if let Some(previous) = self.save_error.take() {
+                    let message = t("配置尚未保存，当前修改仅在本次运行中生效。\n%s")
+                        .replace("%s", previous.message());
+                    if self
+                        .error_dialog
+                        .as_ref()
+                        .and_then(|dialog| dialog.text())
+                        .is_some_and(|text| text == message)
+                    {
+                        if let Some(dialog) = self.error_dialog.take() {
+                            ffi_gtk::destroy(&dialog);
+                        }
+                    }
+                }
+                self.save_error = None;
+                self.save_retry.clear();
+                self.update_save_status();
+                true
+            }
+            Err(error) => {
+                let notify = self
+                    .save_error
+                    .as_ref()
+                    .is_none_or(|old| old.message() != error.message());
+                self.save_error = Some(error.clone());
+                self.update_save_status();
+                if notify {
+                    self.show_error(
+                        &t("配置尚未保存，当前修改仅在本次运行中生效。\n%s")
+                            .replace("%s", error.message()),
+                    );
+                }
+                if !self.save_blocked && self.rc_path.is_some() && !self.save_retry.is_set() {
+                    let weak = self.weak();
+                    self.save_retry.set_timeout_seconds(3, move || {
+                        if let Some(rc) = weak.upgrade() {
+                            crate::util::with_dock(&rc, |d| {
+                                d.save_retry.take();
+                                d.save();
+                            });
+                        }
+                        glib::ControlFlow::Break
+                    });
+                }
+                false
+            }
+        }
+    }
+
+    fn try_save(&self) -> Result<(), glib::Error> {
+        if self.save_blocked || self.rc_path.is_none() {
+            return Err(glib::Error::new(
+                gio::IOErrorEnum::Failed,
+                &t("当前配置不可保存，请修复配置文件后重新加载插件。"),
+            ));
         }
         let file = glib::KeyFile::new();
         let _ = file.load_from_file(self.rc_path(), glib::KeyFileFlags::KEEP_COMMENTS);
@@ -153,7 +223,8 @@ impl Dock {
         self.settings.save(&file);
         self.save_associations(&file);
         let data = file.to_data();
-        crate::settings::write_private_file(&self.rc_path(), data.as_bytes()).is_ok()
+        crate::settings::write_private_file(&self.rc_path(), data.as_bytes())
+            .map_err(|error| glib::Error::new(glib::FileError::Io, &error.to_string()))
     }
 
     pub fn queue_refresh(&mut self) {
@@ -382,8 +453,9 @@ impl Dock {
 
     /// Port of `dispose` from plugin.c. Idempotent; also runs from `Drop`.
     pub fn dispose(&mut self) {
-        self.save();
+        let _ = self.try_save();
         self.disposing = true;
+        self.save_retry.clear();
 
         self.input = None; // removes the fd source, then closes the display
         self.refresh_id.clear();
@@ -394,6 +466,16 @@ impl Dock {
         if let Some(dialog) = self.association_dialog.take() {
             ffi_gtk::destroy(&dialog);
         }
+        if let Some(dialog) = self.launcher_dialog.take() {
+            ffi_gtk::destroy(&dialog);
+        }
+        if let Some(dialog) = self.application_dialog.take() {
+            ffi_gtk::destroy(&dialog);
+        }
+        self.save_status = None;
+        self.save_status_label = None;
+        self.launcher_list = None;
+        self.association_list = None;
         if let Some(dialog) = self.settings_dialog.take() {
             ffi_gtk::destroy(&dialog);
         }
@@ -560,23 +642,32 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
     let orientation = plugin.orientation();
     let unit = 32.max(plugin.size()) as u32;
 
-    let container = gtk::Box::new(orientation, 2);
+    let container = crate::layout::AdaptiveBox::new(orientation);
     container.set_widget_name("zero-dock");
     let box_ = gtk::Box::new(orientation, 2);
     box_.set_widget_name("zero-dock");
-    box_.set_size_request(12, 12);
     container.pack_start(&box_, false, false, 0);
     let overflow = gtk::Button::with_label("…");
     overflow.set_no_show_all(true);
+    let empty_launcher =
+        gtk::Button::from_icon_name(Some("list-add-symbolic"), gtk::IconSize::Button);
+    empty_launcher.set_tooltip_text(Some(&t("添加固定应用…")));
+    empty_launcher.set_no_show_all(true);
+    if let Some(accessible) = empty_launcher.accessible() {
+        accessible.set_name(&t("添加固定应用…"));
+    }
 
     let css = gtk::CssProvider::new();
     css.load_from_data(
-        b"#zero-dock button {padding:0; margin:0; border:0; background:none; box-shadow:none;} #zero-dock button:hover {background:alpha(@theme_selected_bg_color,0.18); border-radius:8px;} #zero-dock .zd-sound {background:@theme_bg_color;color:@theme_fg_color;border-radius:8px; min-width:16px; min-height:16px;} .zd-popup {background:@theme_bg_color; color:@theme_fg_color; border:1px solid shade(@theme_bg_color,0.65); border-radius:8px; padding:8px;} #zero-dock button:focus {box-shadow:inset 0 0 0 2px @theme_selected_bg_color;} .zd-popup button {padding:4px;}",
+        b"#zero-dock button {padding:0; margin:0; border:0; background:none; box-shadow:none;} #zero-dock button:hover {background:alpha(@theme_selected_bg_color,0.18); border-radius:8px;} #zero-dock .zd-sound {background:@theme_bg_color;color:@theme_fg_color;border-radius:8px; min-width:16px; min-height:16px;} #zero-dock .zd-overflow-active {background:alpha(@theme_selected_bg_color,0.18); border-radius:8px;} #zero-dock .zd-overflow-urgent {box-shadow:inset 0 0 0 2px #f4b400; border-radius:8px;} .zd-popup {background:@theme_bg_color; color:@theme_fg_color; border:1px solid shade(@theme_bg_color,0.65); border-radius:8px; padding:8px;} #zero-dock button:focus {box-shadow:inset 0 0 0 2px @theme_selected_bg_color;} .zd-popup button {padding:4px;}",
     )
     .ok();
     box_.style_context()
         .add_provider(&css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     overflow
+        .style_context()
+        .add_provider(&css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    empty_launcher
         .style_context()
         .add_provider(&css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
@@ -599,6 +690,13 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
             container: container.clone(),
             box_: box_.clone(),
             overflow: overflow.clone(),
+            empty_launcher: empty_launcher.clone(),
+            launcher_dialog: None,
+            launcher_list: None,
+            association_list: None,
+            application_dialog: None,
+            save_status: None,
+            save_status_label: None,
             association_dialog: None,
             settings_dialog: None,
             menu: None,
@@ -627,6 +725,10 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
             settings: Settings::default(),
             app_generation: 1,
             rc_path: rc_path.clone(),
+            layout_length: 0,
+            save_error: None,
+            capture_attempts: 0,
+            capture_failures: 0,
             disposing: false,
             dragging: false,
             save_blocked: false,
@@ -635,6 +737,7 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
             refresh_id: Timer::default(),
             active_frame_id: Timer::default(),
             launch_tick: Timer::default(),
+            save_retry: Timer::default(),
             identity_atoms,
             drag_button: None,
             insert_button: None,
@@ -658,6 +761,30 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
         })
     });
     let dock_rc = dock;
+    {
+        let weak = Rc::downgrade(&dock_rc);
+        container.on_allocate(move |length| {
+            if let Some(rc) = weak.upgrade() {
+                crate::util::with_dock(&rc, |d| {
+                    if !d.disposing {
+                        let changed = d.layout_length != length;
+                        d.layout_update_for_length(length);
+                        if changed {
+                            d.queue_refresh();
+                        }
+                    }
+                });
+            }
+        });
+    }
+    {
+        let weak = Rc::downgrade(&dock_rc);
+        empty_launcher.connect_clicked(move |_| {
+            if let Some(rc) = weak.upgrade() {
+                crate::util::with_dock(&rc, |d| d.choose_application(None));
+            }
+        });
+    }
 
     // Overflow button wiring
     {
@@ -881,8 +1008,11 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
     }
 
     // Plugin presentation
-    plugin_ptr.set_expand(false);
-    plugin_ptr.set_shrink(true);
+    // XEmbed sockets only forward a minimum requisition, not GTK's natural
+    // size. Ask the panel for its actual remaining space; the aligned inner
+    // container requests only its contents and overflows within that space.
+    plugin_ptr.set_shrink(false);
+    plugin_ptr.set_expand(true);
     plugin_ptr.menu_show_configure();
     plugin_ptr.menu_show_about();
     plugin_ptr.add_action_widget(&box_);
@@ -895,16 +1025,25 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
             gtk::TargetFlags::empty(),
             2,
         )];
-        box_.drag_dest_set(gtk::DestDefaults::ALL, &targets, gdk::DragAction::COPY);
-        let weak = Rc::downgrade(&dock_rc);
-        box_.connect_drag_data_received(move |_w, ctx, _x, _y, data, info, time| {
-            if let Some(rc) = weak.upgrade() {
-                crate::util::with_dock(&rc, |d| {
-                    let ok = info == 2 && crate::button::import_uris(d, data);
-                    ctx.drag_finish(ok, false, time);
-                });
-            }
-        });
+        let plugin_widget: gtk::Widget = plugin_ptr.as_object().downcast().ok()?;
+        for surface in [
+            container.clone().upcast::<gtk::Widget>(),
+            box_.clone().upcast(),
+            overflow.clone().upcast(),
+            empty_launcher.clone().upcast(),
+            plugin_widget,
+        ] {
+            surface.drag_dest_set(gtk::DestDefaults::ALL, &targets, gdk::DragAction::COPY);
+            let weak = Rc::downgrade(&dock_rc);
+            surface.connect_drag_data_received(move |_w, ctx, _x, _y, data, info, time| {
+                if let Some(rc) = weak.upgrade() {
+                    crate::util::with_dock(&rc, |d| {
+                        let ok = info == 2 && crate::button::import_uris(d, data);
+                        ctx.drag_finish(ok, false, time);
+                    });
+                }
+            });
+        }
     }
 
     // Initial settings load
@@ -943,7 +1082,8 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
     }
 
     // Overlay wiring for the overflow button
-    container.pack_end(&overflow, false, false, 0);
+    box_.pack_end(&overflow, false, false, 0);
+    box_.pack_end(&empty_launcher, false, false, 0);
     crate::ffi_xfce::XfcePanelPlugin::add_action_widget(&plugin_ptr, &container);
 
     // Show the plugin and run the first refresh.

@@ -11,7 +11,8 @@ A native XFCE panel dock for X11, written entirely in Rust (the cdylib exports t
 - The first matching window reuses its pinned icon and position; closing the last window restores the launcher. Additional windows keep separate icons.
 - Clickable live previews with close controls, workspace labels and cached frames for minimized windows; frame caches are limited to 32 MiB per instance.
 - Persistent manual window-class associations when automatic application recognition needs correction.
-- A configurable visible-icon limit and overflow menu, retaining independent windows and workspace filtering.
+- An adaptive icon area that grows with its contents and overflows automatically within the space the panel allocates, retaining independent windows and workspace filtering.
+- Searchable native application selection and management of pins, unavailable launchers and saved association rules.
 - Native configuration backup/restore, automatic pre-restore backups, keyboard focus navigation and configurable mouse actions.
 - GTK theme colors and monitor-aware preview limits.
 - Per-application mute and volume controls through PulseAudio or PipeWire-Pulse.
@@ -30,7 +31,7 @@ The screenshot uses a synthetic test window. This is an early release; compatibi
 
 Linux, XFCE panel 4.20+, libxfce4windowing 4.20+, libxfce4ui 4.18+, GTK 3.24+, X11, and a PulseAudio-compatible audio server. Live previews require an X11 compositor. Wayland is not supported.
 
-Build dependencies: Rust 1.75+ (cargo), Meson 0.63+, Ninja, gettext, pkg-config, GLib/GIO, libpulse, libX11, libXcomposite and libXi. Tests additionally require libXtst, Xvfb, xfwm4, D-Bus, Python 3 and `pacat`.
+Build dependencies: Rust/Cargo (validated with Rust 1.98.1), Meson 0.63+, Ninja, gettext, pkg-config, GLib/GIO, libpulse, libX11, libXcomposite and libXi. Tests additionally require libXtst, Xvfb, xfwm4, D-Bus, Python 3 and `pacat`.
 
 ## Build and install
 
@@ -60,15 +61,18 @@ Add **Zero Dock Window Dock** through **Panel → Add New Items**. Multiple inst
 | Speaker badge: click | Mute/unmute the application |
 | Speaker badge: wheel | Change application volume in 5% steps |
 | Preview image: click | Restore and activate the window |
+| Preview image: middle click | Follow the same middle-click preference as window icons |
+| Overflow item | Click to switch/launch; middle click follows preferences; right click or Shift+F10 opens full actions |
+| Empty dock: “+” | Search installed applications or choose a desktop file to pin |
 | `.desktop` file: drag onto dock | Pin a launcher |
 | Any button: drag | Reorder buttons |
 | Empty space: right click | Show desktop, minimize all, and panel options |
 
-The preview's speaker button also supports mute and scrolling. Preferences control previews, numbering, workspace filtering and reserved icon slots. Configuration lives at `~/.config/xfce4/panel/zero-dock-<instance-id>.rc`.
+The preview's speaker button also supports mute and scrolling. The icon area uses its content size and the panel’s actual available space; it has no reserved length or preset icon count. Old `Slots` and `MaxVisible` settings are migrated automatically. Configuration lives at `~/.config/xfce4/panel/zero-dock-<instance-id>.rc`.
 
 Pinned icons stay visible when workspace filtering is enabled and prefer a window on the current workspace. The app's context menu lists its windows across workspaces. Clicking a pin with only an off-workspace window switches to that workspace; additional unpinned windows follow the filter.
 
-Preferences also expose preview width, hover delay, refresh interval and launch timeout. Restore defaults keeps pinned apps. Unavailable launcher files stay in the saved list with a warning. Diagnostic exports contain version, counts and settings.
+Preferences expose preview timing, click behavior and **Manage pinned applications and associations**. Unavailable launchers can be replaced in place. Failed saves show an unsaved state, retain runtime changes and retry automatically or through **Retry saving**. Restores validate the entire file before replacement. Diagnostic exports include audio/compositor health, allocation and capture counts without personal paths or window titles.
 
 ## Limitations
 

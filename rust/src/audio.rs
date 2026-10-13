@@ -87,6 +87,15 @@ impl Drop for Audio {
 }
 
 impl Audio {
+    pub fn connection_state(&self) -> &'static str {
+        match self.ctx.as_ref().map(|ctx| ctx.get_state()) {
+            Some(State::Ready) => "ready",
+            Some(State::Failed | State::Terminated) => "disconnected",
+            Some(_) => "connecting",
+            None => "unavailable",
+        }
+    }
+
     pub fn new(dock: DockWeak) -> Option<AudioRef> {
         let mainloop = Mainloop::new(None)?;
         let rc: AudioRef = Rc::new_cyclic(|weak: &AudioWeak| {

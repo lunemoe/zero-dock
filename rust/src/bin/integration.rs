@@ -105,6 +105,7 @@ mod raw {
 
     /// Move the pointer with XTest.
     pub fn move_pointer(x: i32, y: i32) {
+        let (x, y) = physical_point((x, y));
         unsafe {
             xtest::XTestFakeMotionEvent(test_api::xdisplay(), -1, x, y, 0);
             xlib::XFlush(test_api::xdisplay());
@@ -122,6 +123,8 @@ mod raw {
 
     /// Press button 1, glide to (`tx`, `ty`) in steps, release.
     pub fn drag_pointer(from: (i32, i32), to: (i32, i32)) {
+        let from = physical_point(from);
+        let to = physical_point(to);
         unsafe {
             let display = test_api::xdisplay();
             xtest::XTestFakeMotionEvent(display, -1, from.0, from.1, 0);
@@ -138,6 +141,15 @@ mod raw {
             xtest::XTestFakeButtonEvent(display, 1, 0, 0);
             xlib::XFlush(display);
         }
+    }
+
+    fn physical_point(point: (i32, i32)) -> (i32, i32) {
+        let scale = gdk::Screen::default()
+            .and_then(|screen| screen.root_window())
+            .map(|window| window.scale_factor())
+            .unwrap_or(1)
+            .max(1);
+        (point.0 * scale, point.1 * scale)
     }
 
     /// Send a signal to another process (test fixtures only).
@@ -266,12 +278,16 @@ fn widget_center(widget: &impl IsA<gtk::Widget>) -> (i32, i32) {
 
 /// Move the pointer over a widget without clicking (C harness `mouse_at`).
 fn hover_widget(widget: &impl IsA<gtk::Widget>) {
+    // Recreated/restored controls need one layout pass before root coordinates
+    // are meaningful; their initial allocation is (-1, -1, 1, 1).
+    pump(60);
     let (x, y) = widget_center(widget);
     raw::move_pointer(x, y);
     pump(120);
 }
 
 fn click_widget(widget: &impl IsA<gtk::Widget>, button: u32) {
+    pump(60);
     let (x, y) = widget_center(widget);
     raw::move_pointer(x, y);
     pump(120);
@@ -280,6 +296,7 @@ fn click_widget(widget: &impl IsA<gtk::Widget>, button: u32) {
 }
 
 fn drag_between(source: &impl IsA<gtk::Widget>, target: &impl IsA<gtk::Widget>, before: bool) {
+    pump(60);
     let (sx, sy) = widget_center(source);
     let (mut tx, mut ty) = widget_center(target);
     let allocation = target.as_ref().allocation();
@@ -377,6 +394,11 @@ impl Host {
 
     fn set_mode(&self, mode: i32) {
         unsafe { xfce_panel_plugin_provider_set_mode(self.raw_plugin, mode) };
+        if mode == 1 {
+            self.window.resize(56, 600);
+        } else {
+            self.window.resize(600, 56);
+        }
         pump(100);
     }
 
@@ -1221,22 +1243,22 @@ fn scenario_improvements() -> TestResult {
     host.refresh();
     {
         let mut d = host.dock.borrow_mut();
-        d.settings.max_visible = 3;
         d.settings.left_action = 1;
         d.settings.middle_action = 2;
         d.settings.scroll_windows = false;
         d.update_buttons();
+        let length = (d.unit as i32 + 2) * 3 - 2;
+        d.layout_update_for_length(length);
         let visible = d.buttons.iter().filter(|b| b.widget.is_visible()).count();
         check!(
             visible <= 2,
-            "max_visible=3 leaves at most two normal buttons"
+            "space for three positions leaves two normal buttons and overflow"
         );
         check!(d.overflow.is_visible(), "overflow button must be visible");
 
         d.config_export(&backup.to_string_lossy())
             .map_err(|e| e.to_string())?;
         d.association_clear(pin);
-        d.settings.max_visible = 0;
     }
 
     host.dock
@@ -1245,7 +1267,6 @@ fn scenario_improvements() -> TestResult {
         .map_err(|e| e.to_string())?;
     {
         let d = host.dock.borrow();
-        check!(d.settings.max_visible == 3, "config restore max_visible");
         check!(d.settings.left_action == 1, "config restore left action");
         check!(
             d.settings.middle_action == 2,
@@ -1277,17 +1298,51 @@ fn scenario_improvements() -> TestResult {
 
     {
         let mut d = host.dock.borrow_mut();
-        d.settings.max_visible = 0;
         d.update_buttons();
         d.settings.preview_delay = 100;
-        d.schedule_preview(pin);
     }
+    let anchor = host
+        .dock
+        .borrow()
+        .button(pin)
+        .ok_or("restored preview anchor")?
+        .main
+        .clone();
+    hover_widget(&anchor);
     pump(250);
+    if std::env::var_os("ZERO_DOCK_TEST_IMAGES").is_some() {
+        save_snapshot("improvements-host", &host.window)?;
+        let screen = gdk::Screen::default().ok_or("screen")?;
+        let root = screen.root_window().ok_or("root")?;
+        let (_, _, width, height) = root.geometry();
+        let pixbuf = root.pixbuf(0, 0, width, height).ok_or("desktop capture")?;
+        let directory = std::env::var("ZERO_DOCK_TEST_IMAGES").map_err(|e| e.to_string())?;
+        pixbuf
+            .savev(
+                Path::new(&directory).join("improvements-desktop.png"),
+                "png",
+                &[],
+            )
+            .map_err(|e| e.to_string())?;
+        let pointer = gdk::Display::default()
+            .and_then(|display| display.default_seat())
+            .and_then(|seat| seat.pointer())
+            .map(|pointer| pointer.position());
+        eprintln!(
+            "preview pointer={pointer:?}, anchor center={:?}, prelight={}",
+            widget_center(&anchor),
+            anchor.state_flags().contains(gtk::StateFlags::PRELIGHT)
+        );
+    }
     {
         let mut d = host.dock.borrow_mut();
         check!(
             d.preview.as_ref().is_some_and(|p| p.is_visible()),
-            "preview should open"
+            "preview should open: pin={pin}, hover={:?}, visible={}, mapped={}, dragging={}, previews={}, showing_desktop={}, allocation={:?}, button={:?}",
+            d.hover_button, d.button(pin).is_some_and(|b| b.widget.is_visible()),
+            d.button(pin).is_some_and(|b| b.main.is_mapped()), d.dragging, d.settings.previews,
+            d.screen.as_ref().is_some_and(|screen| screen.show_desktop()),
+            d.container.allocation(), d.button(pin).map(|b| b.main.allocation())
         );
         check!(
             d.preview_title
@@ -1341,9 +1396,6 @@ fn scenario_improvements() -> TestResult {
             "trim_frames must keep requested frame"
         );
         d.hide_preview();
-        // Restore the exported value so production teardown persists the same
-        // configuration we just verified importing.
-        d.settings.max_visible = 3;
     }
 
     for w in others {
@@ -1360,7 +1412,7 @@ fn scenario_improvements() -> TestResult {
         "rule survives reload"
     );
     check!(
-        host2.dock.borrow().settings.max_visible == 3,
+        host2.dock.borrow().settings.left_action == 1,
         "settings survive reload"
     );
     host2.close();
@@ -1395,9 +1447,19 @@ fn scenario_stress() -> TestResult {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(5);
+    let seconds: u64 = std::env::var("ZERO_DOCK_STRESS_SECONDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    let started = Instant::now();
 
     let mut warm = initial;
-    for cycle in 0..cycles {
+    let mut cycle = 0;
+    while if seconds > 0 {
+        started.elapsed().as_secs() < seconds
+    } else {
+        cycle < cycles
+    } {
         let mut windows = Vec::new();
         for i in 0..32 {
             windows.push(fixture(
@@ -1451,6 +1513,7 @@ fn scenario_stress() -> TestResult {
         if cycle == 0 {
             warm = resident_kib();
         }
+        cycle += 1;
     }
 
     let cpu_before = cpu_micros();
@@ -1465,6 +1528,7 @@ fn scenario_stress() -> TestResult {
     );
 
     let final_rss = resident_kib();
+    eprintln!("stress: cycles={cycle}, windows={}, initial RSS={initial} KiB, warm RSS={warm} KiB, final RSS={final_rss} KiB, idle CPU={cpu_pct:.2}%", cycle * 32);
     check!(
         final_rss < warm.max(initial) + 128 * 1024,
         "RSS grew too much: initial={initial} warm={warm} final={final_rss} KiB"
@@ -2018,8 +2082,431 @@ fn scenario_real_apps() -> TestResult {
 
 type Scenario = (&'static str, fn() -> TestResult);
 
+fn save_snapshot(name: &str, widget: &impl IsA<gtk::Widget>) -> TestResult {
+    let Ok(directory) = std::env::var("ZERO_DOCK_TEST_IMAGES") else {
+        return Ok(());
+    };
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let widget = widget.as_ref();
+    let window = widget.window().ok_or("snapshot window")?;
+    let pixbuf = window
+        .pixbuf(0, 0, widget.allocated_width(), widget.allocated_height())
+        .ok_or("snapshot pixels")?;
+    pixbuf
+        .savev(
+            Path::new(&directory).join(format!("{name}.png")),
+            "png",
+            &[],
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn scenario_adaptive_reliability() -> TestResult {
+    let dir = temp_dir("adaptive-reliability");
+    let rc = dir.join("dock.rc");
+    fs::write(&rc, "[Dock]\nSlots=32\nMaxVisible=1\nCustomKey=keep\n")
+        .map_err(|e| e.to_string())?;
+    let desktop = dir.join("review.desktop");
+    write_desktop(&desktop, "Review app", "ZeroDockReviewA", "/usr/bin/true");
+    let host = Host::new(&rc);
+    let unit = host.dock.borrow().unit as i32;
+    check!(
+        host.dock.borrow().container.preferred_width().1 == unit,
+        "empty dock must request one usable add control, not legacy reserved slots"
+    );
+    let saved = fs::read_to_string(&rc).map_err(|e| e.to_string())?;
+    check!(
+        !saved.contains("Slots=")
+            && !saved.contains("MaxVisible=")
+            && saved.contains("CustomKey=keep"),
+        "migrate old layout keys and preserve unrelated settings"
+    );
+
+    // A real URI drop into the plugin's blank allocated surface must work.
+    let source = fixture("Review drag source", "ZeroDockReviewDnd");
+    source.set_skip_taskbar_hint(true);
+    let child = source.child().ok_or("drag source child")?;
+    child.drag_source_set(
+        gdk::ModifierType::BUTTON1_MASK,
+        &[gtk::TargetEntry::new(
+            "text/uri-list",
+            gtk::TargetFlags::empty(),
+            2,
+        )],
+        gdk::DragAction::COPY,
+    );
+    let uri = format!("file://{}", desktop.display());
+    child.connect_drag_data_get(move |_, _, data, _, _| {
+        data.set_uris(&[&uri]);
+    });
+    pump(200);
+    host.refresh();
+    let surface: gtk::Widget = host
+        .dock
+        .borrow()
+        .plugin
+        .as_ref()
+        .ok_or("plugin")?
+        .as_object()
+        .downcast()
+        .map_err(|_| "plugin widget")?;
+    drag_between(&child, &surface, true);
+    let pin = host
+        .dock
+        .borrow()
+        .buttons
+        .iter()
+        .find(|b| b.pinned)
+        .map(|b| b.id)
+        .ok_or("drop on blank surface did not pin")?;
+    host.dock.borrow_mut().unpin(pin);
+    test_api::destroy_widget(&source);
+    pump(150);
+
+    let add = host.dock.borrow().empty_launcher.clone();
+    add.clicked();
+    check!(
+        host.dock.borrow().application_dialog.is_some(),
+        "empty add control must open native app selection"
+    );
+    let dialog = host
+        .dock
+        .borrow()
+        .application_dialog
+        .clone()
+        .ok_or("app chooser")?;
+    pump(150);
+    save_snapshot("application-chooser", &dialog)?;
+    dialog.response(gtk::ResponseType::Cancel);
+    check!(
+        host.dock.borrow().application_dialog.is_none(),
+        "app chooser must release its state"
+    );
+
+    let a = fixture("Review A", "ZeroDockReviewA");
+    let b = fixture("Review B", "ZeroDockReviewB");
+    pump(200);
+    host.refresh();
+    let aid = button_for(&host, &a).ok_or("button A")?;
+    let aid_xid = xid(&a);
+    check!(window_count(&host) == 2, "two review windows");
+    for delta in [-3, -32, 32, i32::MIN, i32::MAX] {
+        host.dock.borrow_mut().activate(aid);
+        pump(50);
+        host.dock.borrow_mut().cycle(delta);
+        pump(50);
+    }
+
+    let mut others = Vec::new();
+    for i in 0..4 {
+        others.push(fixture(
+            &format!("Adaptive {i}"),
+            &format!("AdaptiveClass{i}"),
+        ));
+    }
+    pump(200);
+    host.refresh();
+    host.window.resize((unit + 2) * 3 - 2, 56);
+    pump(200);
+    {
+        let d = host.dock.borrow();
+        check!(
+            d.buttons.iter().filter(|b| b.widget.is_visible()).count() == 2
+                && d.overflow.is_visible(),
+            "shrinking actual allocation must reserve the third position for overflow"
+        );
+        check!(
+            d.container.preferred_width().1 == (unit + 2) * 6 - 2,
+            "hidden buttons must remain in the natural request, allowing expansion"
+        );
+    }
+    host.window.resize(800, 56);
+    pump(200);
+    check!(
+        host.dock
+            .borrow()
+            .buttons
+            .iter()
+            .all(|b| b.widget.is_visible())
+            && !host.dock.borrow().overflow.is_visible(),
+        "more available space must restore all windows without sticky overflow"
+    );
+    check!(
+        host.dock.borrow().container.allocation().width() == (unit + 2) * 6 - 2,
+        "icon area should occupy its content width, not the entire host width"
+    );
+    save_snapshot("adaptive-expanded", &host.window)?;
+    host.window.resize(unit, 56);
+    pump(200);
+    check!(
+        host.dock
+            .borrow()
+            .buttons
+            .iter()
+            .all(|b| !b.widget.is_visible())
+            && host.dock.borrow().overflow.is_visible(),
+        "one-position allocation must keep every window reachable via overflow"
+    );
+
+    a.set_urgency_hint(true);
+    pump(150);
+    {
+        let mut d = host.dock.borrow_mut();
+        d.refresh();
+        check!(
+            d.overflow.style_context().has_class("zd-overflow-active"),
+            "overflow must indicate its hidden active window"
+        );
+        check!(
+            d.overflow.style_context().has_class("zd-overflow-urgent"),
+            "overflow must indicate native attention requests"
+        );
+        d.button_mut(aid).ok_or("audio status target")?.audio = test_api::AudioStatus {
+            present: true,
+            playing: true,
+            muted: false,
+            percent: 50,
+        };
+        d.update_overflow_status();
+        check!(
+            d.overflow.label().is_some_and(|label| label.contains('♪')),
+            "overflow must show hidden application audio"
+        );
+    }
+    a.set_urgency_hint(false);
+    pump(100);
+
+    // Hidden rows retain normal activation and real right-click window actions.
+    host.dock.borrow_mut().overflow_menu(None);
+    pump(120);
+    let menu = host.dock.borrow().menu.clone().ok_or("overflow menu")?;
+    save_snapshot("overflow", &menu)?;
+    let row = menu.children().into_iter().next().ok_or("hidden row")?;
+    click_widget(&row, 3);
+    let actions = host
+        .dock
+        .borrow()
+        .menu
+        .clone()
+        .ok_or("hidden window actions")?;
+    check!(
+        actions != menu && actions.children().len() >= 10,
+        "right click hidden row must open the full window menu"
+    );
+    test_api::destroy_widget(&actions);
+    pump(100);
+    host.set_mode(1);
+    host.window.resize(56, (unit + 2) * 3 - 2);
+    pump(200);
+    check!(
+        host.dock
+            .borrow()
+            .buttons
+            .iter()
+            .filter(|b| b.widget.is_visible())
+            .count()
+            == 2
+            && host.dock.borrow().overflow.is_visible(),
+        "vertical layout must also adapt to allocated height"
+    );
+    host.set_mode(0);
+    host.window.resize(800, 56);
+    pump(150);
+
+    // Preview middle clicks must obey the same no-op and close settings.
+    {
+        let mut d = host.dock.borrow_mut();
+        d.settings.middle_action = 2;
+        d.settings.preview_delay = 100;
+    }
+    let anchor = host
+        .dock
+        .borrow()
+        .button(aid)
+        .ok_or("preview anchor")?
+        .main
+        .clone();
+    hover_widget(&anchor);
+    pump(200);
+    check!(
+        host.dock.borrow().hover_button == Some(aid),
+        "real preview hover must belong to A"
+    );
+    let image = host
+        .dock
+        .borrow()
+        .preview_image
+        .as_ref()
+        .and_then(|image| image.parent())
+        .ok_or("preview image")?;
+    click_widget(&image, 2);
+    check!(
+        host.dock.borrow().hover_button == Some(aid),
+        "no-op middle click must retain the hovered window"
+    );
+    check!(
+        host.dock
+            .borrow()
+            .button(aid)
+            .is_some_and(|b| b.launch_error.is_none() && !b.launching && b.window.is_some()),
+        "disabled preview middle click must not launch or close"
+    );
+    host.dock.borrow_mut().settings.middle_action = 1;
+    click_widget(&image, 2);
+    check!(
+        wait_until(1200, || test_api::button_for_xid(
+            &host.dock.borrow(),
+            aid_xid
+        )
+        .is_none()),
+        "preview middle close must close its window"
+    );
+
+    let before = fs::read(&rc).map_err(|e| e.to_string())?;
+    let excessive = dir.join("too-many.rc");
+    let mut contents = String::from("[Dock]\n[Associations]\n");
+    for i in 0..513 {
+        contents.push_str(&format!("{i:064x}=/tmp/rule-{i}.desktop\n"));
+    }
+    fs::write(&excessive, &contents).map_err(|e| e.to_string())?;
+    check!(
+        host.dock
+            .borrow_mut()
+            .config_import(&excessive.to_string_lossy())
+            .is_err(),
+        "513 rules must be rejected"
+    );
+    check!(
+        fs::read(&rc).map_err(|e| e.to_string())? == before,
+        "invalid restore must not touch current configuration"
+    );
+    let oversized_rule = contents
+        .rfind("0000000000000000000000000000000000000000000000000000000000000200=")
+        .ok_or("513th key")?;
+    contents.truncate(oversized_rule);
+    fs::write(&excessive, contents).map_err(|e| e.to_string())?;
+    host.dock
+        .borrow_mut()
+        .config_import(&excessive.to_string_lossy())
+        .map_err(|e| e.to_string())?;
+    check!(
+        host.dock.borrow().associations.len() == 512,
+        "512-rule restore must preserve every rule"
+    );
+
+    let app = gio::DesktopAppInfo::from_filename(&desktop).ok_or("review app")?;
+    let pending_path = dir.join("missing-parent/dock.rc");
+    host.dock.borrow_mut().associations.clear();
+    {
+        let mut d = host.dock.borrow_mut();
+        d.configure();
+        d.rc_path = Some(pending_path.to_string_lossy().into_owned());
+        d.pin_app(&app);
+        check!(
+            d.save_error.is_some()
+                && d.error_dialog.is_some()
+                && d.save_status.as_ref().is_some_and(|row| row.is_visible()),
+            "failed persistence must have visible unsaved state and error feedback"
+        );
+        let window = d
+            .buttons
+            .iter()
+            .find_map(|button| button.window.clone())
+            .ok_or("live window")?;
+        check!(
+            d.associate(&window, Some(&desktop.to_string_lossy()))
+                .is_err(),
+            "association must not report success when persistence failed"
+        );
+    }
+    fs::create_dir_all(pending_path.parent().ok_or("pending parent")?)
+        .map_err(|e| e.to_string())?;
+    check!(
+        wait_until(4500, || host.dock.borrow().save_error.is_none()),
+        "automatic save retry must recover after the directory becomes writable"
+    );
+    check!(
+        host.dock
+            .borrow()
+            .save_status
+            .as_ref()
+            .is_some_and(|row| !row.is_visible())
+            && pending_path.is_file(),
+        "clear unsaved UI after successful persistence"
+    );
+    host.dock.borrow_mut().rc_path = Some(rc.to_string_lossy().into_owned());
+
+    // Replace unavailable pins in place and expose saved rules without live windows.
+    let missing = host
+        .dock
+        .borrow_mut()
+        .add_pin(&dir.join("missing.desktop").to_string_lossy())
+        .ok_or("unavailable pin")?;
+    let replacement = dir.join("replacement.desktop");
+    write_desktop(
+        &replacement,
+        "Replacement",
+        "ReplacementClass",
+        "/usr/bin/true",
+    );
+    let app = gio::DesktopAppInfo::from_filename(&replacement).ok_or("replacement app")?;
+    let position = host.dock.borrow().button_index(missing);
+    host.dock
+        .borrow_mut()
+        .replace_pin(missing, &app)
+        .map_err(|e| e.to_string())?;
+    check!(
+        host.dock.borrow().button_index(missing) == position
+            && host
+                .dock
+                .borrow()
+                .button(missing)
+                .is_some_and(|b| b.app.is_some()),
+        "replacement must preserve the pin's id and position"
+    );
+    host.dock.borrow_mut().associations.insert(
+        "f".repeat(64),
+        dir.join("orphan.desktop").to_string_lossy().into_owned(),
+    );
+    host.dock.borrow_mut().manage_launchers();
+    check!(
+        host.dock.borrow().launcher_dialog.is_some()
+            && host
+                .dock
+                .borrow()
+                .association_list
+                .as_ref()
+                .is_some_and(|list| list.children().len() == 2),
+        "manager must list saved associations even when no matching window is open"
+    );
+    pump(150);
+    let manager = host
+        .dock
+        .borrow()
+        .launcher_dialog
+        .clone()
+        .ok_or("manager")?;
+    save_snapshot("launcher-manager", &manager)?;
+    let diagnostics = host.dock.borrow().diagnostics();
+    check!(
+        diagnostics.contains("Layout: adaptive")
+            && diagnostics.contains("Audio connection:")
+            && !diagnostics.contains(&dir.to_string_lossy().to_string()),
+        "diagnostics must include runtime health without personal paths"
+    );
+    b.close();
+    for window in others {
+        window.close();
+    }
+    pump(200);
+    host.close();
+    let _ = fs::remove_dir_all(dir);
+    Ok(())
+}
+
 fn scenarios() -> Vec<Scenario> {
     vec![
+        ("adaptive-reliability", scenario_adaptive_reliability),
         ("native-all", scenario_native_all),
         ("external-wrappers", scenario_external_wrappers),
         ("pinned-lifecycle", scenario_pinned_lifecycle),

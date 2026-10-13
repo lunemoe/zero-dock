@@ -1,6 +1,7 @@
 rust/src/apps.rs
 rust/src/associations.rs
 rust/src/layout.rs
+rust/src/launchers.rs
 rust/src/menu.rs
 rust/src/preview.rs
 rust/src/settings.rs

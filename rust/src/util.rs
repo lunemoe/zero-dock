@@ -20,7 +20,7 @@ pub fn t(s: &str) -> glib::GString {
 
 pub const VERSION: &str = match option_env!("ZERO_DOCK_VERSION") {
     Some(v) => v,
-    None => "0.3.0",
+    None => env!("CARGO_PKG_VERSION"),
 };
 
 pub fn monotonic_us() -> i64 {
@@ -127,5 +127,8 @@ pub type DockWeak = std::rc::Weak<RefCell<crate::dock::Dock>>;
 /// no-ops instead of aborting the process.
 pub fn with_dock<T>(rc: &DockRef, f: impl FnOnce(&mut crate::dock::Dock) -> T) -> Option<T> {
     let mut borrow = rc.try_borrow_mut().ok()?;
+    if borrow.disposing {
+        return None;
+    }
     Some(f(&mut borrow))
 }

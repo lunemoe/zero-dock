@@ -18,8 +18,6 @@ pub struct Settings {
     pub preview_delay: u32,
     pub preview_interval: u32,
     pub launch_timeout: u32,
-    pub slots: u32,
-    pub max_visible: u32,
     pub left_action: u32,
     pub middle_action: u32,
 }
@@ -35,8 +33,6 @@ impl Default for Settings {
             preview_delay: 350,
             preview_interval: 650,
             launch_timeout: 10000,
-            slots: 10,
-            max_visible: 16,
             left_action: 0,
             middle_action: 0,
         }
@@ -64,8 +60,6 @@ impl Settings {
         self.preview_interval =
             integer_setting(f, "PreviewInterval", self.preview_interval, 200, 2000);
         self.launch_timeout = integer_setting(f, "LaunchTimeout", self.launch_timeout, 2000, 60000);
-        self.slots = integer_setting(f, "Slots", self.slots, 0, 32);
-        self.max_visible = integer_setting(f, "MaxVisible", self.max_visible, 0, 64);
         self.left_action = integer_setting(f, "LeftAction", self.left_action, 0, 1);
         self.middle_action = integer_setting(f, "MiddleAction", self.middle_action, 0, 2);
         self.scroll_windows = boolean_setting(f, "ScrollWindows", self.scroll_windows);
@@ -79,8 +73,9 @@ impl Settings {
         f.set_integer("Dock", "PreviewDelay", self.preview_delay as i32);
         f.set_integer("Dock", "PreviewInterval", self.preview_interval as i32);
         f.set_integer("Dock", "LaunchTimeout", self.launch_timeout as i32);
-        f.set_integer("Dock", "Slots", self.slots as i32);
-        f.set_integer("Dock", "MaxVisible", self.max_visible as i32);
+        // Migrate fixed-length layouts: neither old key controls allocation.
+        let _ = f.remove_key("Dock", "Slots");
+        let _ = f.remove_key("Dock", "MaxVisible");
         f.set_integer("Dock", "LeftAction", self.left_action as i32);
         f.set_integer("Dock", "MiddleAction", self.middle_action as i32);
         f.set_boolean("Dock", "ScrollWindows", self.scroll_windows);
@@ -88,6 +83,21 @@ impl Settings {
 }
 
 impl Dock {
+    pub fn update_save_status(&self) {
+        if let Some(row) = self.save_status.as_ref() {
+            row.set_visible(self.save_error.is_some());
+        }
+        if let Some(label) = self.save_status_label.as_ref() {
+            label.set_text(
+                &self
+                    .save_error
+                    .as_ref()
+                    .map(|error| t("尚未保存：%s").replace("%s", error.message()))
+                    .unwrap_or_default(),
+            );
+        }
+    }
+
     /// Load `path` into `file`; on a non-missing read error, keep a backup and
     /// block saving until the configuration is fixed (mirrors settings.c).
     pub fn settings_read(&mut self, path: &str, file: &KeyFile) -> bool {
@@ -172,7 +182,7 @@ impl Dock {
             .filter(|b| b.pinned && b.app.is_none())
             .count();
         format!(
-            "Zero Dock {}\nBackend: X11\nGTK: {}.{}.{}\nWindows: {}\nPinned: {}\nUnavailable launchers: {}\nOrientation: {}\nIcon size: {}\nScale: {}\nPreviews: {}\nPreview width: {}\nPreview delay: {} ms\nPreview interval: {} ms\nLaunch timeout: {} ms\nAll workspaces: {}\nReserved slots: {}\nMax visible: {}\nManual associations: {}\n",
+            "Zero Dock {}\nBackend: X11\nGTK: {}.{}.{}\nWindows: {}\nPinned: {}\nUnavailable launchers: {}\nOrientation: {}\nIcon size: {}\nScale: {}\nPreviews: {}\nPreview width: {}\nPreview delay: {} ms\nPreview interval: {} ms\nLaunch timeout: {} ms\nAll workspaces: {}\nLayout: adaptive\nAllocated length: {}\nHidden eligible buttons: {}\nManual associations: {}\nAudio connection: {}\nCompositor: {}\nUnsaved changes: {}\nUnrecognized windows: {}\nPreview captures: {}\nFailed captures: {}\n",
             crate::util::VERSION,
             gtk::major_version(),
             gtk::minor_version(),
@@ -189,9 +199,16 @@ impl Dock {
             self.settings.preview_interval,
             self.settings.launch_timeout,
             self.settings.all_workspaces,
-            self.settings.slots,
-            self.settings.max_visible,
-            self.associations.len()
+            self.layout_length,
+            self.buttons.iter().filter(|b| b.eligible && !b.widget.is_visible()).count(),
+            self.associations.len(),
+            self.audio.as_ref().and_then(|audio| audio.try_borrow().ok())
+                .map(|audio| audio.connection_state()).unwrap_or("unavailable"),
+            gdk::Screen::default().is_some_and(|screen| screen.is_composited()),
+            self.save_error.is_some(),
+            self.buttons.iter().filter(|b| b.window.is_some() && b.app.is_none()).count(),
+            self.capture_attempts,
+            self.capture_failures,
         )
     }
 
@@ -230,9 +247,14 @@ impl Dock {
         let contents = std::fs::read(path)
             .map_err(|e| glib::Error::new(glib::FileError::Io, &format!("{}", e)))?;
         let file = KeyFile::new();
-        let text = String::from_utf8_lossy(&contents).into_owned();
+        let text = std::str::from_utf8(&contents).map_err(|_| {
+            glib::Error::new(
+                gio::IOErrorEnum::InvalidData,
+                &t("所选文件不是有效的 Zero Dock 配置。"),
+            )
+        })?;
         let valid = file
-            .load_from_data(&text, glib::KeyFileFlags::KEEP_COMMENTS)
+            .load_from_data(text, glib::KeyFileFlags::KEEP_COMMENTS)
             .is_ok();
 
         // Validate pins and association rules before touching anything.
@@ -245,7 +267,7 @@ impl Dock {
                     true
                 }
                 Ok(_) => false,
-                Err(_) => true, // missing key is allowed
+                Err(_) => !file.has_key("Dock", "Pinned").unwrap_or(false),
             };
         if valid {
             for pin in &pins {
@@ -259,8 +281,11 @@ impl Dock {
             if let Ok(keys) = file.keys("Associations") {
                 valid = keys.len() <= 512;
                 for key in &keys {
+                    if !valid {
+                        break;
+                    }
                     let value = file.string("Associations", key).ok();
-                    valid = valid_key(key) && value.is_some();
+                    valid &= valid_key(key) && value.is_some();
                     if valid {
                         let value = value.unwrap().to_string();
                         valid = value.starts_with('/') && value.ends_with(".desktop");
@@ -279,9 +304,16 @@ impl Dock {
             ));
         }
 
+        let mut settings = Settings::default();
+        settings.load(&file);
+        settings.save(&file);
+        let mut seen = std::collections::HashSet::new();
+        pins.retain(|pin| seen.insert(pin.clone()));
+        write_pins_to_keyfile(&file, &pins);
+        let normalized = file.to_data();
         let backup = format!("{}.backup-{}", self.rc_path(), real_time_us());
         self.config_export(&backup)?;
-        write_private_file(&self.rc_path(), &contents)
+        write_private_file(&self.rc_path(), normalized.as_bytes())
             .map_err(|e| glib::Error::new(glib::FileError::Io, &format!("{}", e)))?;
 
         self.hide_preview();
@@ -312,15 +344,14 @@ impl Dock {
             }
         });
 
-        self.settings = Settings::default();
-        self.settings.load(&file);
+        self.settings = settings;
         self.load_associations(&file);
         self.app_generation += 1;
         for pin in &pins {
             self.add_pin(pin);
         }
         self.refresh();
-        self.save();
+        self.refresh_launcher_manager();
         Ok(())
     }
 }
@@ -376,12 +407,10 @@ pub fn write_private_file(path: &str, contents: &[u8]) -> std::io::Result<()> {
 /// Identifies a numeric setting bound to a spin button or combo box.
 #[derive(Clone, Copy, PartialEq)]
 enum IntField {
-    Slots,
     PreviewWidth,
     PreviewDelay,
     PreviewInterval,
     LaunchTimeout,
-    MaxVisible,
     LeftAction,
     MiddleAction,
 }
@@ -389,24 +418,20 @@ enum IntField {
 impl IntField {
     fn get(self, s: &Settings) -> u32 {
         match self {
-            IntField::Slots => s.slots,
             IntField::PreviewWidth => s.preview_width,
             IntField::PreviewDelay => s.preview_delay,
             IntField::PreviewInterval => s.preview_interval,
             IntField::LaunchTimeout => s.launch_timeout,
-            IntField::MaxVisible => s.max_visible,
             IntField::LeftAction => s.left_action,
             IntField::MiddleAction => s.middle_action,
         }
     }
     fn set(self, s: &mut Settings, value: u32) {
         match self {
-            IntField::Slots => s.slots = value,
             IntField::PreviewWidth => s.preview_width = value,
             IntField::PreviewDelay => s.preview_delay = value,
             IntField::PreviewInterval => s.preview_interval = value,
             IntField::LaunchTimeout => s.launch_timeout = value,
-            IntField::MaxVisible => s.max_visible = value,
             IntField::LeftAction => s.left_action = value,
             IntField::MiddleAction => s.middle_action = value,
         }
@@ -445,6 +470,32 @@ impl Dock {
             600.min((area.height() - 48).max(200)),
         );
 
+        let status = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        status.set_no_show_all(true);
+        let status_label = gtk::Label::new(None);
+        status_label.set_line_wrap(true);
+        status_label.set_line_wrap_mode(pango::WrapMode::WordChar);
+        status_label.set_max_width_chars(60);
+        status_label.set_xalign(0.0);
+        status_label.set_hexpand(true);
+        let retry = gtk::Button::with_label(&t("重试保存"));
+        let weak = self.weak();
+        retry.connect_clicked(move |_| {
+            if let Some(rc) = weak.upgrade() {
+                crate::util::with_dock(&rc, |d| {
+                    d.save();
+                });
+            }
+        });
+        status.pack_start(&status_label, true, true, 0);
+        status.pack_end(&retry, false, false, 0);
+        status_label.show();
+        retry.show();
+        box_.pack_start(&status, false, false, 0);
+        self.save_status = Some(status);
+        self.save_status_label = Some(status_label);
+        self.update_save_status();
+
         // Boolean toggles
         let bools = [
             (t("显示可点击的窗口预览"), BoolField::Previews),
@@ -473,13 +524,6 @@ impl Dock {
         // Numeric rows: (label, field, low, high, step)
         let numbers = [
             (
-                t("预留图标位置（0 为自动宽度）"),
-                IntField::Slots,
-                0,
-                32,
-                1.0,
-            ),
-            (
                 t("预览宽度（像素）"),
                 IntField::PreviewWidth,
                 180,
@@ -506,13 +550,6 @@ impl Dock {
                 2000,
                 60000,
                 50.0,
-            ),
-            (
-                t("最多显示图标数（含溢出按钮，0 为不限）"),
-                IntField::MaxVisible,
-                0,
-                64,
-                1.0,
             ),
         ];
         for (label, field, low, high, step) in numbers {
@@ -580,6 +617,14 @@ impl Dock {
 
         // Backup / restore
         let backups = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let manage = gtk::Button::with_label(&t("管理固定应用与关联…"));
+        let weak = self.weak();
+        manage.connect_clicked(move |_| {
+            if let Some(rc) = weak.upgrade() {
+                crate::util::with_dock(&rc, |d| d.manage_launchers());
+            }
+        });
+        box_.pack_start(&manage, false, false, 0);
         for (i, label) in [t("备份配置…"), t("恢复配置…")].into_iter().enumerate() {
             let button = gtk::Button::with_label(&label);
             let restore = i == 1;
@@ -618,7 +663,7 @@ impl Dock {
         box_.pack_start(&actions, false, false, 0);
 
         let info = gtk::Label::new(Some(&t(
-            "固定图标复用首个窗口，其他窗口独立显示。\n拖入 .desktop 文件可固定应用。\n喇叭滚轮调整应用音量，最高 200%。\n预览画面仅保存在内存中。",
+            "固定图标复用首个窗口，其他窗口独立显示。\n长度随内容和面板空间自动调整，空间不足时显示更多菜单。\n拖入 .desktop 文件或选择应用即可固定。\n图标和预览共用中键设置。\n喇叭滚轮调整应用音量，最高 200%。\n预览画面仅保存在内存中。",
         )));
         info.set_xalign(0.0);
         box_.pack_start(&info, false, false, 4);
@@ -636,6 +681,9 @@ impl Dock {
                 if let Some(rc) = weak.upgrade() {
                     crate::util::with_dock(&rc, |d| {
                         d.settings_dialog = None;
+                        d.close_launcher_dialogs();
+                        d.save_status = None;
+                        d.save_status_label = None;
                     });
                 }
             });
@@ -644,7 +692,7 @@ impl Dock {
         self.settings_dialog = Some(dialog);
     }
 
-    fn monitor_area(&self) -> gdk::Rectangle {
+    pub(crate) fn monitor_area(&self) -> gdk::Rectangle {
         let Some(display) = gdk::Display::default() else {
             return gdk::Rectangle::new(0, 0, 1024, 768);
         };
@@ -667,6 +715,7 @@ impl Dock {
     }
 
     fn reset_settings(&mut self) {
+        self.close_launcher_dialogs();
         self.settings = Settings::default();
         self.hide_preview();
         for b in &mut self.buttons {
@@ -778,10 +827,10 @@ impl Dock {
                             } else {
                                 d.config_export(&path)
                             };
+                            restored = restore && result.is_ok();
                             if let Err(e) = result {
                                 d.show_error(e.message());
                             }
-                            restored = restore;
                         });
                     }
                 }
@@ -790,6 +839,7 @@ impl Dock {
             if restored {
                 if let Some(rc) = weak.upgrade() {
                     crate::util::with_dock(&rc, |d| {
+                        d.close_launcher_dialogs();
                         if let Some(s) = d.settings_dialog.take() {
                             ffi_gtk::destroy(&s);
                         }
