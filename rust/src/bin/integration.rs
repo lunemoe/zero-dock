@@ -14,7 +14,7 @@ use gio::prelude::*;
 use glib::gobject_ffi::GObject;
 use glib::translate::FromGlibPtrNone;
 use gtk::prelude::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::CString;
 use std::fs;
 use std::os::raw::{c_char, c_int};
@@ -123,6 +123,13 @@ mod raw {
 
     /// Press button 1, glide to (`tx`, `ty`) in steps, release.
     pub fn drag_pointer(from: (i32, i32), to: (i32, i32)) {
+        press_and_glide(from, to);
+        release_pointer();
+    }
+
+    /// Press button 1 and glide to (`tx`, `ty`) in steps, holding the button
+    /// down so a caller can observe mid-drag state.
+    pub fn press_and_glide(from: (i32, i32), to: (i32, i32)) {
         let from = physical_point(from);
         let to = physical_point(to);
         unsafe {
@@ -138,8 +145,14 @@ mod raw {
                 xlib::XFlush(display);
                 pump(15);
             }
-            xtest::XTestFakeButtonEvent(display, 1, 0, 0);
-            xlib::XFlush(display);
+        }
+    }
+
+    /// Release button 1.
+    pub fn release_pointer() {
+        unsafe {
+            xtest::XTestFakeButtonEvent(test_api::xdisplay(), 1, 0, 0);
+            xlib::XFlush(test_api::xdisplay());
         }
     }
 
@@ -577,6 +590,145 @@ fn scenario_native_all() -> TestResult {
         "real mouse drag should reorder dock buttons"
     );
     drop(d);
+
+    // Drag motion moves only the insertion marker, so the marker has to track
+    // the button and half under the pointer and clear on leave without a full
+    // dock refresh behind it.
+    {
+        let (sx, sy) = widget_center(&source_main);
+        let (tx, ty) = widget_center(&reorder_target);
+        let allocation = reorder_target.allocation();
+        let horizontal = host.dock.borrow().orientation == gtk::Orientation::Horizontal;
+        let before = if horizontal {
+            (tx - allocation.width() / 4, ty)
+        } else {
+            (tx, ty - allocation.height() / 4)
+        };
+        let after = if horizontal {
+            (tx + allocation.width() / 4, ty)
+        } else {
+            (tx, ty + allocation.height() / 4)
+        };
+        raw::press_and_glide((sx, sy), before);
+        pump(150);
+        {
+            let d = host.dock.borrow();
+            check!(
+                d.insert_button == Some(target_id),
+                "drag motion should mark the button under the pointer"
+            );
+            check!(
+                !d.insert_after,
+                "the leading half should insert before the target"
+            );
+        }
+        raw::move_pointer(after.0, after.1);
+        pump(150);
+        {
+            let d = host.dock.borrow();
+            check!(
+                d.insert_button == Some(target_id),
+                "the marker should stay on the same button across its halves"
+            );
+            check!(
+                d.insert_after,
+                "the trailing half should insert after the target"
+            );
+        }
+        raw::move_pointer(20, 20);
+        pump(250);
+        check!(
+            host.dock.borrow().insert_button.is_none(),
+            "leaving the dock should clear the insertion marker"
+        );
+        raw::release_pointer();
+        pump(250);
+        check!(
+            host.dock.borrow().insert_button.is_none(),
+            "the insertion marker must not survive the drag"
+        );
+    }
+
+    // GTK can emit drag-end synchronously while another dock callback is
+    // updating state. A cancelled drag must still restore click and hover
+    // handling after that callback releases its mutable borrow.
+    {
+        pump(500); // Let the previous failed drop's snapback animation finish.
+        let captured_context = Rc::new(RefCell::new(None));
+        let captured = captured_context.clone();
+        let begin_handler = source_main.connect_drag_begin(move |_, ctx| {
+            captured.replace(Some(ctx.clone()));
+        });
+        let ended = Rc::new(Cell::new(false));
+        let observed = ended.clone();
+        let end_handler = source_main.connect_drag_end(move |_, _| observed.set(true));
+        let from = widget_center(&source_main);
+        raw::press_and_glide(from, (from.0 + 200, from.1 + 200));
+        check!(host.dock.borrow().dragging, "the native drag should start");
+        let context = captured_context
+            .borrow_mut()
+            .take()
+            .ok_or("native drag context")?;
+        {
+            let _updating = host.dock.borrow_mut();
+            context.drag_cancel();
+            check!(ended.get(), "GTK should emit drag-end during cancellation");
+        }
+        raw::release_pointer();
+        source_main.disconnect(begin_handler);
+        source_main.disconnect(end_handler);
+        drop(context); // Release GTK's drag icon before checking pointer input.
+        check!(
+            wait_until(1000, || {
+                let d = host.dock.borrow();
+                !d.dragging
+                    && d.drag_button.is_none()
+                    && d.drag_context.is_none()
+                    && d.insert_button.is_none()
+            }),
+            "a re-entrant drag-end must restore dock interaction"
+        );
+        pump(500);
+        let (x, y) = widget_center(&source_main);
+        raw::move_pointer(x, y);
+        check!(
+            wait_until(1500, || {
+                let d = host.dock.borrow();
+                d.hover_button == Some(source_id)
+                    && d.preview.as_ref().is_some_and(|p| p.is_visible())
+            }),
+            "hover must open a preview after a cancelled drag: hover={:?}, dragging={}, source_mapped={}",
+            host.dock.borrow().hover_button,
+            host.dock.borrow().dragging,
+            source_main.is_mapped()
+        );
+        {
+            let mut d = host.dock.borrow_mut();
+            d.hide_preview();
+            d.activate(target_id);
+        }
+        check!(
+            wait_until(1000, || {
+                host.dock
+                    .borrow()
+                    .button(target_id)
+                    .and_then(|b| b.window.as_ref())
+                    .is_some_and(|w| XfwWindow::new(w).is_active())
+            }),
+            "the other window should be active before the click"
+        );
+        click_widget(&source_main, 1);
+        check!(
+            wait_until(1000, || {
+                host.dock
+                    .borrow()
+                    .button(source_id)
+                    .and_then(|b| b.window.as_ref())
+                    .is_some_and(|w| XfwWindow::new(w).is_active())
+            }),
+            "click must activate the window after a cancelled drag"
+        );
+    }
 
     // Composite capture and minimize path.
     {
@@ -1979,6 +2131,48 @@ fn scenario_panel_autolength() -> TestResult {
             .savev(Path::new(&output).join("panel-autolength.png"), "png", &[])
             .map_err(|e| e.to_string())?;
     }
+    // Reordering must work through the real panel's XEmbed socket, including
+    // its cross-process DnD forwarding, rather than only in the plain host.
+    let (x, y, _, _) = socket_geometry(parent).ok_or("panel socket before drag")?;
+    raw::drag_pointer((x + 124, y + 24), (x + 12, y + 24));
+    check!(
+        wait_until(3000, || {
+            let Some((x, y, _, _)) = socket_geometry(parent) else {
+                return false;
+            };
+            gdk::Screen::default()
+                .and_then(|screen| screen.root_window())
+                .and_then(|root| root.pixbuf(x + 18, y + 18, 12, 12))
+                .is_some_and(|pixels| {
+                    let (r, _, b) = center_rgb(&pixels);
+                    b > r
+                })
+        }),
+        "dragging inside the real panel must move the blue icon before red"
+    );
+    // Release immediately after moving from an accepted target into the gap
+    // between icons. XEmbed forwarding can still have the previous MOVE
+    // status when the release reaches the source.
+    let (x, y, _, _) = socket_geometry(parent).ok_or("panel socket before gap drag")?;
+    let first_child = first.child().ok_or("red fixture child")?;
+    for _ in 0..3 {
+        raw::press_and_glide((x + 24, y + 24), (x + 124, y + 24));
+        pump(100);
+        raw::move_pointer(x + 49, y + 24);
+        raw::release_pointer();
+        pump(600);
+        click_widget(&first_child, 1);
+        check!(
+            wait_until(1000, || first.is_active()),
+            "red fixture should be active before the post-drag click"
+        );
+        raw::move_pointer(x + 24, y + 24);
+        raw::click_pointer(1);
+        check!(
+            wait_until(1500, || third.is_active()),
+            "a drop at the icon gap must not leave the real panel dock unresponsive"
+        );
+    }
     third.close();
     check!(
         wait_until(3000, || socket_geometry(parent)
@@ -2014,6 +2208,23 @@ fn scenario_panel_autolength() -> TestResult {
             .is_some_and(|(_, _, w, h)| w == 48 && h == 148)),
         "vertical automatic panel must use content height, got {:?}",
         socket_geometry(parent)
+    );
+    let (x, y, _, _) = socket_geometry(parent).ok_or("vertical panel socket")?;
+    raw::drag_pointer((x + 24, y + 124), (x + 24, y + 12));
+    check!(
+        wait_until(1500, || {
+            let Some((x, y, _, _)) = socket_geometry(parent) else {
+                return false;
+            };
+            gdk::Screen::default()
+                .and_then(|screen| screen.root_window())
+                .and_then(|root| root.pixbuf(x + 18, y + 18, 12, 12))
+                .is_some_and(|pixels| {
+                    let (_, g, b) = center_rgb(&pixels);
+                    g > 128 && g > b
+                })
+        }),
+        "vertical panel drag must move the yellow icon to the first position"
     );
     check!(
         panel.0.try_wait().map_err(|e| e.to_string())?.is_none(),

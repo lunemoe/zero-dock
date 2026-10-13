@@ -16,6 +16,8 @@ use crate::util::{monotonic_us, t, DockWeak};
 use gdk::keys::constants as Key;
 use gdk::prelude::*;
 use gtk::prelude::*;
+use std::cell::Cell;
+use std::rc::Rc;
 
 /// A normalized scroll event: built from GDK events by handlers and from raw
 /// coordinates by the XInput2 path, so audio code never touches GDK events.
@@ -208,6 +210,7 @@ impl Dock {
         button.widget.show_all();
         button.widget.set_no_show_all(true);
         self.buttons.push(button);
+        self.audio_dirty = true;
         id
     }
 
@@ -286,6 +289,7 @@ impl Dock {
             b.match_dirty = false;
             b.match_generation = self.app_generation;
         }
+        self.audio_dirty = true;
         self.window_index
             .insert(window.as_ptr() as usize, button_id);
 
@@ -352,6 +356,7 @@ impl Dock {
         }
         if self.drag_button == Some(button_id) {
             self.drag_button = None;
+            self.drag_context = None;
             self.dragging = false;
         }
         if self.insert_button == Some(button_id) {
@@ -380,6 +385,7 @@ impl Dock {
         button.last_audio_time = 0;
         button.pid = 0;
         button.icon_dirty = true;
+        self.audio_dirty = true;
     }
 
     pub fn free_button(&mut self, button_id: u64) {
@@ -400,6 +406,7 @@ impl Dock {
             b.pid = 0;
             b.thumbnail_time = 0;
         }
+        self.audio_dirty = true;
         self.queue_refresh();
     }
 
@@ -559,6 +566,7 @@ impl Dock {
                     b.key = format!("pin:{}", path);
                 }
                 self.app_generation += 1;
+                self.audio_dirty = true;
                 if let Some(b) = self.button_mut(id) {
                     b.icon_dirty = true;
                 }
@@ -619,6 +627,51 @@ impl Dock {
         self.save();
         self.update_buttons();
         self.refresh_launcher_manager();
+    }
+
+    /// Resolve the insertion position at release, including icon gaps. Only
+    /// the visible icon area belongs to an internal reorder.
+    fn reorder_target_at(&self, x: i32, y: i32) -> Option<(u64, bool)> {
+        let horizontal = self.orientation == gtk::Orientation::Horizontal;
+        let point = if horizontal { x } else { y };
+        let mut bounds: Option<(i32, i32, i32, i32)> = None;
+        let mut nearest: Option<(i64, u64, bool)> = None;
+        for b in &self.buttons {
+            if !b.main.is_mapped() {
+                continue;
+            }
+            let Some(top) = b.main.toplevel() else {
+                continue;
+            };
+            let Some(window) = top.window() else {
+                continue;
+            };
+            let Some((bx, by)) = b.main.translate_coordinates(&top, 0, 0) else {
+                continue;
+            };
+            let (_, ox, oy) = window.origin();
+            let a = b.main.allocation();
+            let (left, top, right, bottom) =
+                (ox + bx, oy + by, ox + bx + a.width(), oy + by + a.height());
+            bounds = Some(match bounds {
+                Some((l, t, r, b)) => (l.min(left), t.min(top), r.max(right), b.max(bottom)),
+                None => (left, top, right, bottom),
+            });
+            let center = if horizontal {
+                (left + right) / 2
+            } else {
+                (top + bottom) / 2
+            };
+            let distance = (i64::from(point) - i64::from(center)).abs();
+            if nearest.is_none_or(|(old, _, _)| distance < old) {
+                nearest = Some((distance, b.id, point > center));
+            }
+        }
+        let (left, top, right, bottom) = bounds?;
+        if x < left || x >= right || y < top || y >= bottom {
+            return None;
+        }
+        nearest.map(|(_, id, after)| (id, after))
     }
 
     // -- audio scroll entry point (shared with preview popup) ---------------
@@ -691,8 +744,83 @@ pub fn scroll_steps(event: &ScrollInfo, accumulator: Option<&mut f64>) -> i32 {
 // Widget wiring
 // ---------------------------------------------------------------------------
 
+fn finish_drag(weak: &DockWeak, context: &gdk::DragContext) {
+    let Some(rc) = weak.upgrade() else { return };
+    let mut d = match rc.try_borrow_mut() {
+        Ok(d) => d,
+        Err(_) => {
+            // GTK can end a drag synchronously during a dock update. Dropping
+            // that transition would leave `dragging` set and suppress every
+            // subsequent left click and preview, so replay it after the update.
+            let weak = weak.clone();
+            let context = context.clone();
+            glib::idle_add_local_once(move || finish_drag(&weak, &context));
+            return;
+        }
+    };
+    // A deferred end belongs only to its own drag, even if a new drag has
+    // already started on the same button or the source has been removed.
+    if d.disposing || d.drag_context.as_ref() != Some(context) {
+        return;
+    }
+    d.dragging = false;
+    d.drag_button = None;
+    d.drag_context = None;
+    d.insert_button = None;
+    d.update_buttons();
+}
+
+fn pointer_position() -> Option<(i32, i32)> {
+    let pointer = gdk::Display::default()?.default_seat()?.pointer()?;
+    let (_, x, y) = pointer.position();
+    Some((x, y))
+}
+
+fn complete_reorder(
+    weak: &DockWeak,
+    button_id: u64,
+    context: &gdk::DragContext,
+    point: Option<(i32, i32)>,
+    completed: &Rc<Cell<bool>>,
+) {
+    let Some(rc) = weak.upgrade() else {
+        context.emit_by_name::<()>("cancel", &[&gdk::DragCancelReason::Error]);
+        return;
+    };
+    let accepted = {
+        let mut d = match rc.try_borrow_mut() {
+            Ok(d) => d,
+            Err(_) => {
+                let weak = weak.clone();
+                let context = context.clone();
+                let completed = completed.clone();
+                glib::idle_add_local_once(move || {
+                    complete_reorder(&weak, button_id, &context, point, &completed)
+                });
+                return;
+            }
+        };
+        if d.disposing || d.drag_context.as_ref() != Some(context) {
+            false
+        } else if let Some((target, after)) = point.and_then(|(x, y)| d.reorder_target_at(x, y)) {
+            d.move_button(button_id, target, after);
+            true
+        } else {
+            false
+        }
+    };
+    completed.set(accepted);
+    // This is an in-process reorder. End GTK's source operation without
+    // sending an XdndDrop through the panel socket and waiting for its reply.
+    // Cancel only after releasing Dock: GTK emits drag-end synchronously.
+    // The managed GDK cancellation also releases its pointer/keyboard grab;
+    // gtk_drag_cancel alone does not run that native class handler.
+    context.emit_by_name::<()>("cancel", &[&gdk::DragCancelReason::Error]);
+}
+
 fn wire_button(b: &mut Button, weak: DockWeak) {
     let button_id = b.id;
+    let completed_locally = Rc::new(Cell::new(false));
 
     // draw
     {
@@ -910,28 +1038,60 @@ fn wire_button(b: &mut Button, weak: DockWeak) {
     );
     {
         let weak = weak.clone();
-        b.main.connect_drag_begin(move |_w, _ctx| {
+        let completed = completed_locally.clone();
+        b.main.connect_drag_begin(move |_w, ctx| {
+            completed.set(false);
             if let Some(rc) = weak.upgrade() {
                 crate::util::with_dock(&rc, |d| {
                     d.dragging = true;
                     d.drag_button = Some(button_id);
+                    d.drag_context = Some(ctx.clone());
                     d.hide_preview();
                 });
             }
+            let weak = weak.clone();
+            let completed = completed.clone();
+            // GTK connects its own drop-performed handler after drag-begin.
+            // Handle internal ordering first, so XEmbed cannot lose the final
+            // reply when release follows a last-moment target change.
+            ctx.connect_local("drop-performed", false, move |values| {
+                let context = values[0].get::<gdk::DragContext>().expect("drag context");
+                context.stop_signal_emission_by_name("drop-performed");
+                complete_reorder(&weak, button_id, &context, pointer_position(), &completed);
+                None
+            });
         });
     }
     {
         let weak = weak.clone();
-        b.main.connect_drag_end(move |_w, _ctx| {
-            if let Some(rc) = weak.upgrade() {
-                crate::util::with_dock(&rc, |d| {
-                    d.dragging = false;
-                    d.drag_button = None;
-                    d.insert_button = None;
-                    d.update_buttons();
+        let completed = completed_locally.clone();
+        b.main.connect_drag_failed(move |_, ctx, reason| {
+            // No target can mean an icon gap with no native DnD destination.
+            // It is still a valid internal insertion position.
+            let inserted = reason == gtk::DragResult::NoTarget
+                && weak.upgrade().is_some_and(|rc| {
+                    crate::util::with_dock(&rc, |d| {
+                        if d.drag_context.as_ref() != Some(ctx) {
+                            return false;
+                        }
+                        if let Some((target, after)) =
+                            pointer_position().and_then(|(x, y)| d.reorder_target_at(x, y))
+                        {
+                            d.move_button(button_id, target, after);
+                            true
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false)
                 });
-            }
+            glib::Propagation::from(inserted || completed.replace(false))
         });
+    }
+    {
+        let weak = weak.clone();
+        b.main
+            .connect_drag_end(move |_w, ctx| finish_drag(&weak, ctx));
     }
     {
         let weak = weak.clone();
@@ -957,13 +1117,20 @@ fn wire_button(b: &mut Button, weak: DockWeak) {
             let mut result = false;
             crate::util::with_dock(&rc, |d| {
                 let a = w.allocation();
-                d.insert_button = Some(button_id);
-                d.insert_after = if d.orientation == gtk::Orientation::Horizontal {
+                let after = if d.orientation == gtk::Orientation::Horizontal {
                     x > a.width() / 2
                 } else {
                     y > a.height() / 2
                 };
-                d.update_buttons();
+                // The insertion marker is the only state a motion event
+                // changes, so repaint the buttons carrying it instead of
+                // running a full dock refresh for every pointer event.
+                if d.insert_button != Some(button_id) || d.insert_after != after {
+                    let previous = d.insert_button;
+                    d.insert_button = Some(button_id);
+                    d.insert_after = after;
+                    d.repaint_insert_marker(previous, Some(button_id));
+                }
                 ctx.drag_status(
                     if d.drag_button.is_some() {
                         gdk::DragAction::MOVE
@@ -982,8 +1149,10 @@ fn wire_button(b: &mut Button, weak: DockWeak) {
         b.main.connect_drag_leave(move |_w, _ctx, _time| {
             if let Some(rc) = weak.upgrade() {
                 crate::util::with_dock(&rc, |d| {
-                    d.insert_button = None;
-                    d.update_buttons();
+                    let previous = d.insert_button.take();
+                    // Keep `insert_after`: the drop still needs the half of
+                    // the button the pointer was released over.
+                    d.repaint_insert_marker(previous, None);
                 });
             }
         });
@@ -1205,6 +1374,20 @@ impl Dock {
 
     // -- refresh cycle -------------------------------------------------------
 
+    /// Repaint the buttons that carry (or carried) the drop insertion marker.
+    ///
+    /// Drag motion only moves that marker, so this replaces the full
+    /// [`Dock::update_buttons`] refresh on the pointer-motion path: a full
+    /// refresh redoes layout, tooltips, per-button geometry and the audio
+    /// matching pass, which is milliseconds per event on a populated dock.
+    pub fn repaint_insert_marker(&mut self, before: Option<u64>, after: Option<u64>) {
+        for id in [before, after].into_iter().flatten() {
+            if let Some(button) = self.button(id) {
+                button.drawing.queue_draw();
+            }
+        }
+    }
+
     /// Port of `zd_update_buttons`: icons, numbering, tooltips, geometry.
     pub fn update_buttons(&mut self) {
         self.layout_update();
@@ -1332,14 +1515,21 @@ impl Dock {
                 }
             }
         }
-        self.update_audio_buttons();
+        if self.audio_dirty {
+            self.update_audio_buttons();
+        }
     }
 
     /// Port of `zd_update_audio_buttons`.
+    ///
+    /// Recomputes which button owns which audio stream. This walks every
+    /// button/stream pair with process ancestry checks, so it runs only when
+    /// the mapping or the stream list can actually have changed.
     pub fn update_audio_buttons(&mut self) {
         if self.disposing {
             return;
         }
+        self.audio_dirty = false;
         let ids: Vec<u64> = self.buttons.iter().map(|b| b.id).collect();
         for id in ids {
             let Some(index) = self.button_index(id) else {

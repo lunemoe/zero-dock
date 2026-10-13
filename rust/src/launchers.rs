@@ -186,6 +186,7 @@ impl Dock {
         button.launch_error = None;
         button.icon_dirty = true;
         self.app_generation += 1;
+        self.audio_dirty = true;
         self.refresh();
         self.refresh_launcher_manager();
         if self.save() {

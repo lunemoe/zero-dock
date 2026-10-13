@@ -1,4 +1,4 @@
-project('zero-dock', version: '0.3.2', license: 'MIT', meson_version: '>=0.63.0',
+project('zero-dock', version: '0.3.3', license: 'MIT', meson_version: '>=0.63.0',
         default_options: ['buildtype=debugoptimized'])
 cargo = find_program('cargo')
 copy = find_program('cp')

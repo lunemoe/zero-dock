@@ -82,6 +82,10 @@ pub struct Dock {
     pub dragging: bool,
     pub save_blocked: bool,
     pub autohide_blocked: bool,
+    /// The button/window mapping changed since the last audio pass, so the
+    /// cached stream matching is stale. Stream-side changes (add, remove,
+    /// mute, volume) refresh audio directly from the PulseAudio callbacks.
+    pub audio_dirty: bool,
 
     // Timers
     pub hover_id: Timer,
@@ -93,6 +97,7 @@ pub struct Dock {
     // Drag / hover state
     pub identity_atoms: [Atom; 4],
     pub drag_button: Option<u64>,
+    pub drag_context: Option<gdk::DragContext>,
     pub insert_button: Option<u64>,
     pub insert_after: bool,
     pub hover_button: Option<u64>,
@@ -313,6 +318,7 @@ impl Dock {
                             let b = &mut self.buttons[i];
                             b.app = app.clone();
                             b.icon_dirty = true;
+                            self.audio_dirty = true;
                         }
                     }
                 }
@@ -733,6 +739,7 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
             dragging: false,
             save_blocked: false,
             autohide_blocked: false,
+            audio_dirty: true,
             hover_id: Timer::default(),
             refresh_id: Timer::default(),
             active_frame_id: Timer::default(),
@@ -740,6 +747,7 @@ pub fn construct(plugin: XfcePanelPlugin) -> Option<DockRef> {
             save_retry: Timer::default(),
             identity_atoms,
             drag_button: None,
+            drag_context: None,
             insert_button: None,
             insert_after: false,
             hover_button: None,

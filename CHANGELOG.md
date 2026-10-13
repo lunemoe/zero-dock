@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3 — 2026-10-13
+
+- Complete same-instance icon reordering locally on release, including gaps between icons, and release native input grabs immediately. Avoid XFCE XEmbed drop completion races that could leave the dock unresponsive until GTK's drop timeout.
+- Replay drag-end callbacks interrupted by a dock update, clearing the drag state so clicks and previews keep working after cancellation. Ignore deferred completion from older drags.
+- Stop dragging an icon from stuttering: pointer motion during a drag now repaints only the buttons carrying the drop insertion marker instead of running the whole dock refresh (layout, tooltips, per-button geometry and the audio matching pass) for every motion event. On a dock with 13 icons and 5 audio streams this drops the per-event cost from ~11.5 ms to ~0.03 ms and the CPU time of a scripted 90-event drag by ~5.5x.
+- Recompute audio ownership only when the stream list or the button/window mapping changes, instead of on every refresh.
+- Cover the drag insertion marker (tracked button, leading/trailing half, cleared on leave and drop) in the native integration scenario.
+
 ## 0.3.2 — 2026-10-13
 
 - Fix automatic XFCE panels collapsing Zero Dock into a single overflow button after startup or a panel restart. Publish content-derived XEmbed hints for automatic panels and retain a small minimum for fixed panels; bound content by the monitor's space after other panel items.

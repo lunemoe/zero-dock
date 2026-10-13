@@ -181,6 +181,7 @@ impl Dock {
                 b.icon_dirty = true;
             }
         }
+        self.audio_dirty = true;
         self.queue_refresh();
         self.refresh_launcher_manager();
     }
@@ -207,6 +208,7 @@ impl Dock {
                     b.app = gio::DesktopAppInfo::from_filename(&desktop);
                     b.icon_dirty = true;
                 }
+                self.audio_dirty = true;
             }
         }
         let has_app = self.button(button_id).is_some_and(|b| b.app.is_some());
